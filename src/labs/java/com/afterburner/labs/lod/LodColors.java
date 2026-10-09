@@ -17,7 +17,7 @@ import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.data.AtlasIds;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.EmptyBlockGetter;
@@ -56,11 +56,11 @@ final class LodColors {
 		seen = models;
 		try {
 			TextureAtlas atlas = mc.getAtlasManager().getAtlasOrThrow(AtlasIds.BLOCKS);
-			Map<Identifier, TextureAtlasSprite> byName = ((TextureAtlasAccessor) atlas).afterburner$texturesByName();
+			Map<ResourceLocation, TextureAtlasSprite> byName = ((TextureAtlasAccessor) atlas).afterburner$texturesByName();
 			IdentityHashMap<TextureAtlasSprite, Integer> sprites = new IdentityHashMap<>(byName.size() * 2);
 			for (TextureAtlasSprite sprite : byName.values()) sprites.put(sprite, average(sprite.contents()));
-			int water = average(atlas.getSprite(Identifier.withDefaultNamespace("block/water_still")).contents());
-			int lava = average(atlas.getSprite(Identifier.withDefaultNamespace("block/lava_still")).contents());
+			int water = average(atlas.getSprite(ResourceLocation.withDefaultNamespace("block/water_still")).contents());
+			int lava = average(atlas.getSprite(ResourceLocation.withDefaultNamespace("block/lava_still")).contents());
 			textures = new Textures(models, sprites, water, lava, mc.getBlockColors());
 		} catch (RuntimeException e) {
 			textures = null;

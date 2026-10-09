@@ -6,6 +6,7 @@ import com.google.common.collect.AbstractIterator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.BlockCollisions;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.CollisionGetter;
@@ -93,9 +94,9 @@ public abstract class BlockCollisionsMixin<T> extends AbstractIterator<T> {
 	@Shadow
 	protected abstract @Nullable BlockGetter getChunk(int x, int z);
 
-	@Inject(method = "<init>(Lnet/minecraft/world/level/CollisionGetter;Lnet/minecraft/world/phys/shapes/CollisionContext;Lnet/minecraft/world/phys/AABB;ZLjava/util/function/BiFunction;)V",
+	@Inject(method = "<init>(Lnet/minecraft/world/level/CollisionGetter;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/AABB;ZLjava/util/function/BiFunction;)V",
 			at = @At("TAIL"))
-	private void afterburner$init(CollisionGetter getter, CollisionContext context, AABB box, boolean onlySuffocating,
+	private void afterburner$init(CollisionGetter getter, @Nullable Entity entity, AABB box, boolean onlySuffocating,
 			BiFunction<BlockPos.MutableBlockPos, VoxelShape, T> provider, CallbackInfo ci) {
 		// The same area as vanilla's cursor.
 		afterburner$minX = afterburner$x = Mth.floor(box.minX - 1.0E-7) - 1;
@@ -110,7 +111,7 @@ public abstract class BlockCollisionsMixin<T> extends AbstractIterator<T> {
 		} else {
 			MAKING_VANILLA_TWIN.set(true);
 			try {
-				afterburner$twin = new BlockCollisions<>(getter, context, box, onlySuffocating, (p, shape) -> new Object[]{p.immutable(), shape});
+				afterburner$twin = new BlockCollisions<>(getter, entity, box, onlySuffocating, (p, shape) -> new Object[]{p.immutable(), shape});
 			} finally {
 				MAKING_VANILLA_TWIN.set(false);
 			}
@@ -145,11 +146,11 @@ public abstract class BlockCollisionsMixin<T> extends AbstractIterator<T> {
 					if (onlySuffocatingBlocks && !state.isSuffocating(getChunk(x, z), pos)) continue;
 					if (type == 1 && !state.hasLargeCollisionShape()) continue;
 					if (type == 2 && !state.is(Blocks.MOVING_PISTON)) continue;
-					VoxelShape blockShape = context.getCollisionShape(state, collisionGetter, pos);
+					VoxelShape blockShape = state.getCollisionShape(collisionGetter, pos, context);
 					if (blockShape == Shapes.block()) {
-						if (box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0)) return blockShape.move(pos);
+						if (box.intersects(x, y, z, x + 1.0, y + 1.0, z + 1.0)) return blockShape.move(x, y, z);
 					} else {
-						VoxelShape shape = blockShape.move(pos);
+						VoxelShape shape = blockShape.move(x, y, z);
 						if (!shape.isEmpty() && afterburner$bumps(blockShape, shape, x, y, z)) return shape;
 					}
 				}
@@ -196,7 +197,7 @@ public abstract class BlockCollisionsMixin<T> extends AbstractIterator<T> {
 			if (chunk.getClass() == LevelChunk.class && !((LevelChunk) chunk).getLevel().isDebug()) {
 				afterburner$chunk = (LevelChunk) chunk;
 				afterburner$sections = afterburner$chunk.getSections();
-				afterburner$minSectionY = afterburner$chunk.getMinSectionY();
+				afterburner$minSectionY = afterburner$chunk.getMinSection();
 			} else {
 				return chunk.getBlockState(pos);
 			}

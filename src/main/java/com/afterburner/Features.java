@@ -9,40 +9,13 @@ import java.util.List;
  * Which optimizations are on. All are on by default; players turn them off in the settings screen or
  * {@code config/afterburner.properties} ({@link Settings}). For testing, a JVM flag such as
  * {@code -Dafterburner.parallelWorldgen=false} wins over the file, and {@code -Dafterburner.disable=true} turns all off.
+ * <p>
+ * On the 1.21.1 branch the render optimizations that were built on 26.3's render pipeline (chunk batching, compact
+ * vertices, occlusion and entity culling, visible-only animations and the like) are not included; Sodium and Iris cover
+ * those on 1.21.1, and Afterburner leaves those parts to them when installed. The features below are the ones that work
+ * on 1.21.1's renderer and server.
  */
 public enum Features {
-	/** Leaves out of each chunk draw the block faces that point away from the camera. */
-	FACE_CULLING("faceCulling", "face culling", Group.RENDER, "sodium"),
-	/** Leaves out of water, glass and ice draws the flat faces that point away from the camera (the upside-down water top, for one). Needs chunk batching. */
-	TRANSLUCENT_CULLING("translucentCulling", "translucent face culling", Group.RENDER, "sodium"),
-	/** Leaves out the faces between leaf blocks deep inside trees, which see-through leaves otherwise all draw. */
-	LEAF_CULLING("leafCulling", "leaf culling", Group.RENDER, "moreculling", "cullleaves", "cull-less-leaves"),
-	/** Skips work vanilla does every frame for chunk layers that have nothing to draw. */
-	DRAW_PREP("drawPrep", "faster draw prep", Group.RENDER, "sodium"),
-	/** Draws the chunk sections of each 128 x 64 x 128 block region with one call instead of one call per section. */
-	CHUNK_BATCHING("chunkBatching", "batched chunk drawing", Group.RENDER, "sodium"),
-	/** Chunk vertices take 16 bytes instead of 28, so the graphics card has less to read for every block face. Needs chunk batching. */
-	COMPACT_VERTICES("compactVertices", "smaller chunk vertices", Group.RENDER, "sodium"),
-	/** Builds the chunk sections around the camera that are off screen while the builders have time, not only once looked at. */
-	OFFSCREEN_BUILDS("offscreenBuilds", "off-screen chunk building", Group.RENDER, "sodium"),
-	/** Skips drawing the chunk sections hidden behind nearer terrain (OpenGL 4.3 and up, or 3.3 with the same extensions). Needs chunk batching. */
-	OCCLUSION_CULLING("occlusionCulling", "occlusion culling", Group.RENDER, "sodium", "iris"),
-	/** Skips drawing the entities and block entities hidden behind terrain, using the occlusion culling test. Needs occlusion culling. */
-	ENTITY_CULLING("entityCulling", "entity culling", Group.RENDER, "sodium", "iris", "entityculling"),
-	/** Smooth texture filtering (RGSS) reads the texture 4 times per pixel instead of 8 or 9, for the same picture. */
-	FAST_FILTERING("fastFiltering", "cheaper texture filtering", Group.RENDER),
-	/** Animated block textures (water, lava, fire...) are only drawn into the texture atlas while something on screen uses them. Needs chunk batching. */
-	VISIBLE_ANIMATIONS("visibleAnimations", "visible-only animations", Group.RENDER, "sodium"),
-	/** The biome blend of water, grass and leaf colours looks each spot's biome up once per chunk section build instead of up to 25 times. Same colours. */
-	FAST_BIOME_BLEND("fastBiomeBlend", "faster biome blending", Group.RENDER, "sodium"),
-	/** While a chunk section is built, smooth lighting keeps the light of every block in and around it, not only the last 100 looked up. Same lighting. */
-	SMOOTH_LIGHT_CACHE("smoothLightCache", "bigger smooth lighting cache", Group.RENDER, "sodium"),
-	/** The visibility update remembers how far each section corner's line to the camera gets, instead of walking it again for every neighbour. Same sections in view. */
-	FAST_VISIBILITY("fastVisibility", "faster visibility updates", Group.RENDER, "sodium"),
-	/** The chunk renderer reserves GPU memory for meshes in pieces that grow with what's needed instead of 128 MB at a time. */
-	CHUNK_BUFFERS("chunkBuffers", "smaller chunk buffers", Group.MEMORY, "sodium"),
-	/** Built chunk sections let go of the copy of the blocks around them they were built from (vanilla keeps the last one). */
-	BUILD_COPIES("buildCopies", "freed chunk build copies", Group.MEMORY, "sodium"),
 	/** While the game is paused or in the background, Java gives the memory it isn't using back to the system. */
 	MEMORY_TRIM("memoryTrim", "memory trim", Group.MEMORY),
 	/** Places trees, ores and structures on every CPU core instead of one, keeping chunks that touch apart. */
@@ -65,12 +38,20 @@ public enum Features {
 	FAST_SPAWNING("fastSpawning", "faster mob spawning", Group.WORLD, "lithium"),
 	/** Villages, trial chambers, ancient cities and bastions check where their next piece fits against a list of boxes instead of a voxel shape that grows with every piece. */
 	FAST_STRUCTURES("fastStructures", "faster structure layout", Group.WORLD, "structure_layout_optimizer"),
-	/** Ore veins ask the world for its height once instead of twice for every block they place, and copper and iron veins share their richness noise instead of each working it out for the whole chunk. */
+	/** Ore veins ask the world for its height once instead of twice for every block they place. */
 	FAST_ORES("fastOres", "faster ore placement", Group.WORLD),
 	/** Which biome goes where in new land: vanilla's search tree read from flat arrays. */
 	FAST_BIOME_SEARCH("fastBiomeSearch", "faster biome search", Group.WORLD, "c2me"),
 	/** Chunks with block or fluid ticks due that can't run them (outside simulation distance) are set aside until they can, instead of being asked again every tick. */
 	PARKED_TICKS("parkedTicks", "parked scheduled ticks", Group.WORLD, "lithium", "moonrise", "c2me"),
+	/** Furnaces, smokers, blast furnaces and campfires with nothing to do (no fuel burning, nothing to cook) skip their ticks until an item, a block change or the like gives them work. */
+	IDLE_BLOCK_ENTITIES("idleBlockEntities", "sleeping idle furnaces", Group.WORLD, "lithium"),
+	/** Explosions look each block in their reach up once instead of at every 0.3-block step of each of their 1352 rays. */
+	FAST_EXPLOSIONS("fastExplosions", "faster explosions", Group.WORLD, "lithium"),
+	/** Redstone dust reads each block around it once while working out its power, and a powered wire works out only the sides it's asked about. */
+	FAST_REDSTONE("fastRedstone", "faster redstone dust", Group.WORLD, "lithium", "alternate-current"),
+	/** Blocks that work out a shape for each state share the shapes that are the same as another block's (every kind of wall makes the same ones). */
+	SHARED_SHAPES("sharedShapes", "shared block shapes", Group.WORLD, "ferritecore"),
 	/** Chunk sections check for use from two threads with one field instead of four objects per block and biome container. */
 	LEAN_SECTIONS("leanSections", "leaner chunk sections", Group.WORLD, "ferritecore", "lithium", "moonrise"),
 	/** The game's background workers run just below normal priority, so frames come first when every core is busy (client). */
@@ -120,7 +101,7 @@ public enum Features {
 		for (Features f : values()) {
 			// A JVM flag (benchmarks, testing) wins over the settings file.
 			String flag = System.getProperty("afterburner." + f.key);
-			boolean on = all && f.replacedBy == null && (flag != null ? !"false".equalsIgnoreCase(flag) : Settings.get(f.key));
+			boolean on = all && f.replacedBy == null && (flag != null ? !"false".equalsIgnoreCase(flag) : Settings.get(f));
 			f.enabled = on;
 		}
 		// In the order listed (a needed one comes first), so what it itself needs is settled first.
@@ -132,11 +113,12 @@ public enum Features {
 
 	/** The optimization this one is built on, which must be on too, or null. */
 	public Features needs() {
-		return switch (this) {
-			case ENTITY_CULLING -> OCCLUSION_CULLING;
-			case COMPACT_VERTICES, OCCLUSION_CULLING, TRANSLUCENT_CULLING, VISIBLE_ANIMATIONS -> CHUNK_BATCHING;
-			default -> null;
-		};
+		return null;
+	}
+
+	/** On unless the settings file says off. */
+	public boolean defaultOn() {
+		return true;
 	}
 
 	/** Set by a JVM flag, which the settings file can't change. */
@@ -156,7 +138,7 @@ public enum Features {
 
 	/** Can be switched off and on again while playing (the code it needs stays in either way). */
 	public boolean live() {
-		return this == OCCLUSION_CULLING || this == ENTITY_CULLING;
+		return false;
 	}
 
 	/** Switches a {@link #live()} one now; one that isn't enabled stays off until a restart. */

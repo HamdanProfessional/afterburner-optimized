@@ -20,7 +20,7 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -108,7 +108,7 @@ public final class Lod {
 		if (level == worldLevel && world != null) return world;
 		closeWorld();
 		Minecraft mc = Minecraft.getInstance();
-		Identifier dimension = level.dimension().identifier();
+		ResourceLocation dimension = level.dimension().identifier();
 		Path folder = mc.gameDirectory.toPath().resolve("afterburner").resolve("lod").resolve(worldName(mc))
 				.resolve(clean(dimension.getNamespace() + "_" + dimension.getPath()));
 		world = new LodWorld(folder, level.getMinY(), level.getHeight(), level.dimensionType().hasSkyLight(),

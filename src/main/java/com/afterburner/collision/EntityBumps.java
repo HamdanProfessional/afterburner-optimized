@@ -4,10 +4,9 @@ import com.afterburner.mixin.collision.LevelEntitiesAccessor;
 import com.afterburner.mixin.collision.LevelEntityGetterAdapterAccessor;
 import com.google.common.collect.ImmutableList;
 import net.minecraft.util.AbortableIterationConsumer;
-import net.minecraft.util.Continuation;
+import net.minecraft.util.AbortableIterationConsumer.Continuation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySelector;
-import net.minecraft.world.entity.boss.enderdragon.EnderDragonPart;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.entity.LevelEntityGetter;
 import net.minecraft.world.level.entity.LevelEntityGetterAdapter;
@@ -67,15 +66,12 @@ public final class EntityBumps {
 		};
 		((LevelEntityGetterAdapterAccessor<Entity>) adapter).afterburner$sections().forEachAccessibleNonEmptySection(bb, section ->
 				((HardEntityCount) section).afterburner$hardEntities() == 0 ? Continuation.CONTINUE : section.getEntities(bb, collect));
-		for (EnderDragonPart part : level.dragonParts()) {
-			if (part != source && part.parentMob != source && bumps(source, part) && bb.intersects(part.getBoundingBox())) found.add(part);
-		}
 		return shapes(found);
 	}
 
 	/** Vanilla's test: {@code CAN_BE_COLLIDED_WITH} without a source, else not a spectator and {@code source.canCollideWith}. */
 	private static boolean bumps(@Nullable Entity source, Entity entity) {
-		return !entity.isSpectator() && (source == null ? entity.canBeCollidedWith(null) : source.canCollideWith(entity));
+		return !entity.isSpectator() && (source == null ? entity.canBeCollidedWith() : source.canCollideWith(entity));
 	}
 
 	private static List<VoxelShape> shapes(List<Entity> entities) {

@@ -24,7 +24,7 @@ import java.util.Optional;
  * methods below), so the copy is updated in the same places.
  */
 @Mixin(SectionStorage.class)
-public abstract class SectionStorageMixin<R, P> implements PoiColumns {
+public abstract class SectionStorageMixin<R> implements PoiColumns {
 	@Shadow
 	@Final
 	protected LevelHeightAccessor levelHeightAccessor;
@@ -36,16 +36,16 @@ public abstract class SectionStorageMixin<R, P> implements PoiColumns {
 	@Shadow
 	protected abstract Optional<R> getOrLoad(long sectionPos);
 
-	@WrapOperation(method = {"getOrCreate", "unpackChunk(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/world/level/chunk/storage/SectionStorage$PackedChunk;)V"},
+	@WrapOperation(method = {"getOrCreate", "readColumn(Lnet/minecraft/world/level/ChunkPos;Lnet/minecraft/resources/RegistryOps;Lnet/minecraft/nbt/CompoundTag;)V"},
 			at = @At(value = "INVOKE", target = "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;put(JLjava/lang/Object;)Ljava/lang/Object;"))
 	private Object afterburner$onPut(Long2ObjectMap<Object> storage, long sectionKey, Object section, Operation<Object> original) {
 		Object old = original.call(storage, sectionKey, section);
-		int index = SectionPos.y(sectionKey) - levelHeightAccessor.getMinSectionY();
+		int index = SectionPos.y(sectionKey) - levelHeightAccessor.getMinSection();
 		int count = levelHeightAccessor.getSectionsCount();
 		if (index >= 0 && index < count) {
 			Long2ObjectOpenHashMap<Optional<?>[]> columns = afterburner$columns;
 			if (columns == null) columns = afterburner$columns = new Long2ObjectOpenHashMap<>();
-			long chunkKey = ChunkPos.pack(SectionPos.x(sectionKey), SectionPos.z(sectionKey));
+			long chunkKey = ChunkPos.asLong(SectionPos.x(sectionKey), SectionPos.z(sectionKey));
 			Optional<?>[] column = columns.get(chunkKey);
 			if (column == null) columns.put(chunkKey, column = new Optional<?>[count]);
 			column[index] = (Optional<?>) section;
@@ -66,7 +66,7 @@ public abstract class SectionStorageMixin<R, P> implements PoiColumns {
 
 	@Override
 	public int afterburner$minSection() {
-		return levelHeightAccessor.getMinSectionY();
+		return levelHeightAccessor.getMinSection();
 	}
 
 	@Override

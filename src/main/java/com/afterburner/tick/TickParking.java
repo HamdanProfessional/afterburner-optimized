@@ -23,7 +23,7 @@ public final class TickParking {
 	public static void checked(long chunk, boolean couldRun) {
 		CHECKED.incrementAndGet();
 		if (couldRun && WRONG.incrementAndGet() <= 20) {
-			Afterburner.LOGGER.error("Scheduled tick check failed: chunk {} was set aside but can run its ticks", ChunkPos.unpack(chunk));
+			Afterburner.LOGGER.error("Scheduled tick check failed: chunk {} was set aside but can run its ticks", new ChunkPos(chunk));
 		}
 	}
 

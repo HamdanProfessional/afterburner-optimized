@@ -4,6 +4,7 @@ import com.afterburner.client.gui.SettingsScreen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
@@ -12,6 +13,8 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+import java.util.List;
 
 /** Puts the button for Afterburner's settings ({@link SettingsScreen}) at the bottom of Video Settings. */
 @Mixin(VideoSettingsScreen.class)
@@ -23,8 +26,8 @@ abstract class VideoSettingsMixin extends OptionsSubScreen {
 	@Inject(method = "addOptions", at = @At("TAIL"))
 	private void afterburner$addSettingsButton(CallbackInfo ci) {
 		if (list == null) return;
-		list.addHeader(Component.translatable("afterburner.settings.title").withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD));
-		list.addBig(Button.builder(Component.translatable("afterburner.settings.button"),
-				b -> minecraft.gui.setScreen(new SettingsScreen(this, options))).build());
+		list.addSmall(List.of(new StringWidget(Component.translatable("afterburner.settings.title").withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
+		list.addSmall(List.of(Button.builder(Component.translatable("afterburner.settings.button"),
+				b -> minecraft.setScreen(new SettingsScreen(this, options))).build()));
 	}
 }

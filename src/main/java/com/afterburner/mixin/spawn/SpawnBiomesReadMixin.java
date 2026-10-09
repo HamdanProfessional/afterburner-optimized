@@ -5,15 +5,15 @@ import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.sugar.Local;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.chunk.ProtoChunk;
-import net.minecraft.world.level.chunk.storage.SerializableChunkData;
+import net.minecraft.world.level.chunk.storage.ChunkSerializer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 /** A chunk read from disk tells {@link SpawnCosts} if one of its biomes has spawn costs. */
-@Mixin(SerializableChunkData.class)
+@Mixin(ChunkSerializer.class)
 public abstract class SpawnBiomesReadMixin {
 	@ModifyReturnValue(method = "read", at = @At("RETURN"))
-	private ProtoChunk afterburner$read(ProtoChunk chunk, @Local(argsOnly = true) ServerLevel level) {
+	private static ProtoChunk afterburner$read(ProtoChunk chunk, @Local(argsOnly = true) ServerLevel level) {
 		SpawnCosts.arrived(level, chunk);
 		return chunk;
 	}

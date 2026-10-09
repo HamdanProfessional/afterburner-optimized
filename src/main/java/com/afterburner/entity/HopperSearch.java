@@ -3,7 +3,7 @@ package com.afterburner.entity;
 import com.afterburner.Afterburner;
 import com.afterburner.mixin.collision.LevelEntitiesAccessor;
 import com.afterburner.mixin.collision.LevelEntityGetterAdapterAccessor;
-import net.minecraft.util.Continuation;
+import net.minecraft.util.AbortableIterationConsumer.Continuation;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySelector;

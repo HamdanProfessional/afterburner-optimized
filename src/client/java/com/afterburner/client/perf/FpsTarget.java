@@ -1,7 +1,7 @@
 package com.afterburner.client.perf;
 
+import com.afterburner.Mobile;
 import com.afterburner.client.Addons;
-import com.afterburner.client.render.WideSections;
 import com.mojang.blaze3d.platform.Monitor;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.fabricmc.loader.api.FabricLoader;
@@ -9,6 +9,7 @@ import net.minecraft.client.CloudStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.util.Mth;
 import org.jspecify.annotations.Nullable;
@@ -153,12 +154,15 @@ public final class FpsTarget {
 			Object[] a = array.elements();
 			int n = array.size(), m = 0;
 			for (int i = 0; i < n; i++) {
-				long node = ((SectionRenderDispatcher.RenderSection) a[i]).getSectionNode();
-				if (drawn(cx, cz, SectionPos.x(node), SectionPos.z(node))) a[m++] = a[i];
+				BlockPos origin = ((SectionRenderDispatcher.RenderSection) a[i]).getOrigin();
+				if (drawn(cx, cz, origin.getX() >> 4, origin.getZ() >> 4)) a[m++] = a[i];
 			}
 			array.size(m);
 		} else {
-			list.removeIf(s -> !drawn(cx, cz, SectionPos.x(s.getSectionNode()), SectionPos.z(s.getSectionNode())));
+			list.removeIf(s -> {
+				BlockPos origin = s.getOrigin();
+				return !drawn(cx, cz, origin.getX() >> 4, origin.getZ() >> 4);
+			});
 		}
 	}
 
@@ -184,7 +188,7 @@ public final class FpsTarget {
 			graceUntil = now + GRACE;
 			windowStart = 0;
 		}
-		if (mc.level == null || mc.player == null || mc.gui.screen() != null || !mc.isWindowActive() || now < graceUntil) {
+		if (mc.level == null || mc.player == null || mc.screen != null || !mc.isWindowActive() || now < graceUntil) {
 			windowStart = 0;
 			return;
 		}
@@ -257,11 +261,11 @@ public final class FpsTarget {
 	/** The target, or less when an FPS limit or VSync holds frames below it. */
 	private static double goal(Minecraft mc) {
 		double goal = target;
-		int limit = mc.getFramerateLimitTracker().getFramerateLimit();
+		int limit = mc.options.framerateLimit().get();
 		if (limit < 260) goal = Math.min(goal, limit);
 		if (mc.options.enableVsync().get()) {
 			Monitor monitor = mc.getWindow().findBestMonitor();
-			if (monitor != null && monitor.currentMode().getRefreshRate() > 0) goal = Math.min(goal, monitor.currentMode().getRefreshRate());
+			if (monitor != null && monitor.getCurrentMode().getRefreshRate() > 0) goal = Math.min(goal, monitor.getCurrentMode().getRefreshRate());
 		}
 		return goal;
 	}
@@ -323,7 +327,6 @@ public final class FpsTarget {
 		if (draw != drawCap) {
 			drawCap = draw;
 			drawChanged = true;
-			WideSections.graphChanged();
 		}
 	}
 
@@ -344,6 +347,8 @@ public final class FpsTarget {
 
 	private static int read() {
 		Properties p = new Properties();
+		// Phones start with a target of 30, so a slow one lowers what's drawn instead of stuttering; it can be turned off.
+		if (Mobile.ACTIVE) p.setProperty("target", "30");
 		if (Files.exists(CONFIG)) {
 			try (Reader in = Files.newBufferedReader(CONFIG, StandardCharsets.UTF_8)) {
 				p.load(in);

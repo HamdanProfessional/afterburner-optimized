@@ -15,6 +15,6 @@ public final class SodiumSettingsPage implements ConfigEntryPoint {
 	public void registerConfigLate(ConfigBuilder builder) {
 		builder.registerOwnModOptions().addPage(builder.createExternalPage()
 				.setName(Component.translatable("afterburner.settings.title"))
-				.setScreenConsumer(parent -> Minecraft.getInstance().gui.setScreen(new SettingsScreen(parent, Minecraft.getInstance().options))));
+				.setScreenConsumer(parent -> Minecraft.getInstance().setScreen(new SettingsScreen(parent, Minecraft.getInstance().options))));
 	}
 }

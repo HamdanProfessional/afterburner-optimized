@@ -1,5 +1,6 @@
 package com.afterburner.labs.mixin.shader;
 
+import com.afterburner.Mobile;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import java.util.Locale;
@@ -12,14 +13,15 @@ import org.spongepowered.asm.mixin.injection.At;
  * The game asks for an OpenGL 3.3 context, and some drivers (Intel's on Windows) give exactly that, though the GPU does 4.6:
  * then shader packs' images, storage buffers and compute programs (colored lighting) can't run. So the newest of 4.6, 4.5
  * and 4.3 is asked for first, and 3.3 as the game does if the driver gives none of them. A 4.x core context runs everything
- * a 3.3 one does. {@code -Dafterburner.gl33=true} keeps the game's 3.3; macOS (whose OpenGL stops at 4.1) is left alone.
+ * a 3.3 one does. {@code -Dafterburner.gl33=true} keeps the game's 3.3; macOS (whose OpenGL stops at 4.1)
+ * and phones (whose launcher turns OpenGL into OpenGL ES or Vulkan) are left alone.
  */
 @Mixin(targets = "com.mojang.renderpearl.backend.opengl.GlDevice")
 public class GlContextVersionMixin {
 	@WrapOperation(method = "<init>", at = @At(value = "INVOKE", target = "Lorg/lwjgl/sdl/SDLVideo;SDL_GL_CreateContext(J)J"))
 	private long afterburner$newerContext(long window, Operation<Long> original) {
 		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-		if (os.contains("mac") || Boolean.getBoolean("afterburner.gl33")) return original.call(window);
+		if (os.contains("mac") || Mobile.ACTIVE || Boolean.getBoolean("afterburner.gl33")) return original.call(window);
 		int[][] versions = {{4, 6}, {4, 5}, {4, 3}};
 		try {
 			for (int[] v : versions) {

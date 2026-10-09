@@ -12,7 +12,8 @@ import org.spongepowered.asm.mixin.injection.At;
 /** The room a jigsaw structure may grow into starts as a {@link FreeSpace}: its outer box with the first piece taken out. */
 @Mixin(JigsawPlacement.class)
 public abstract class JigsawPlacementMixin {
-	@WrapOperation(method = "lambda$addPieces$2", at = @At(value = "INVOKE",
+	// In 1.21.1 the piece-list builder lambda is named method_39824 (lambda$addPieces$2 in 26.3).
+	@WrapOperation(method = "method_39824", at = @At(value = "INVOKE",
 			target = "Lnet/minecraft/world/phys/shapes/Shapes;join(Lnet/minecraft/world/phys/shapes/VoxelShape;Lnet/minecraft/world/phys/shapes/VoxelShape;"
 					+ "Lnet/minecraft/world/phys/shapes/BooleanOp;)Lnet/minecraft/world/phys/shapes/VoxelShape;"))
 	private static VoxelShape afterburner$room(VoxelShape outer, VoxelShape start, BooleanOp op, Operation<VoxelShape> original) {

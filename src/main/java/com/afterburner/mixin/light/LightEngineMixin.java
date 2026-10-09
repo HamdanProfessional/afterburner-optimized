@@ -48,7 +48,7 @@ public abstract class LightEngineMixin {
 	 * @reason Remember the sections looked at during a round of light updates.
 	 */
 	@Overwrite
-	protected BlockState getState(BlockPos pos) {
+	public BlockState getState(BlockPos pos) {
 		int x = pos.getX(), y = pos.getY(), z = pos.getZ();
 		int sx = SectionPos.blockToSectionCoord(x), sy = SectionPos.blockToSectionCoord(y), sz = SectionPos.blockToSectionCoord(z);
 		long key = SectionPos.asLong(sx, sy, sz);
@@ -78,16 +78,16 @@ public abstract class LightEngineMixin {
 			LevelChunk levelChunk = (LevelChunk) chunk;
 			if (levelChunk.getLevel().isDebug()) return null;
 			sections = levelChunk.getSections();
-			minSectionY = levelChunk.getMinSectionY();
+			minSectionY = levelChunk.getMinSection();
 		} else if (chunk.getClass() == ImposterProtoChunk.class) {
 			LevelChunk wrapped = ((ImposterProtoChunk) chunk).getWrapped();
 			if (wrapped.getClass() != LevelChunk.class || wrapped.getLevel().isDebug()) return null;
 			sections = wrapped.getSections();
-			minSectionY = wrapped.getMinSectionY();
+			minSectionY = wrapped.getMinSection();
 		} else if (chunk.getClass() == ProtoChunk.class) {
 			ProtoChunk protoChunk = (ProtoChunk) chunk;
 			sections = protoChunk.getSections();
-			minSectionY = protoChunk.getMinSectionY();
+			minSectionY = protoChunk.getMinSection();
 		} else {
 			return null;
 		}

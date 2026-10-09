@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.At;
 /** Clouds left out while {@link FpsTarget} holds them off; the option itself (and what's saved) stays as set. */
 @Mixin(Options.class)
 public class FpsTargetCloudsMixin {
-	@ModifyReturnValue(method = "getCloudStatus", at = @At("RETURN"))
+	@ModifyReturnValue(method = "getCloudsType", at = @At("RETURN"))
 	private CloudStatus afterburner$clouds(CloudStatus status) {
 		return FpsTarget.cloudsOff() ? CloudStatus.OFF : status;
 	}

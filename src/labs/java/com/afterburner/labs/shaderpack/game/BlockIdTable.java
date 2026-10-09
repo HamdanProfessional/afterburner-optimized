@@ -3,7 +3,7 @@ package com.afterburner.labs.shaderpack.game;
 import com.afterburner.client.render.TerrainExtras;
 import com.afterburner.labs.shaderpack.BlockIdRules;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -20,7 +20,7 @@ final class BlockIdTable {
 	static int[] of(BlockIdRules rules) {
 		int[] table = new int[Block.BLOCK_STATE_REGISTRY.size()];
 		for (BlockIdRules.Rule rule : rules.rules) {
-			Identifier id = Identifier.tryBuild(rule.namespace(), rule.path());
+			ResourceLocation id = ResourceLocation.tryBuild(rule.namespace(), rule.path());
 			if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) continue;
 			Block block = BuiltInRegistries.BLOCK.getValue(id);
 			if (block == null) continue;

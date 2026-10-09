@@ -35,7 +35,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Util;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -87,7 +87,7 @@ final class PackPipelines implements AutoCloseable {
 	private final Set<CompiledRenderPipeline> ours = new ReferenceOpenHashSet<>();
 	private final List<CompiledRenderPipeline> compiled = new ArrayList<>();
 	/** Read by the background threads making pipelines. */
-	private final Map<Identifier, String> sources = new ConcurrentHashMap<>();
+	private final Map<ResourceLocation, String> sources = new ConcurrentHashMap<>();
 	private final Set<String> failed = new LinkedHashSet<>();
 	private long finishing;
 	/** A shadow draw was left out this frame, its program not ready yet. */
@@ -95,12 +95,12 @@ final class PackPipelines implements AutoCloseable {
 
 	private final ShaderSource shaderSource = new ShaderSource() {
 		@Override
-		public @Nullable String getShader(Identifier id, ShaderType type) {
+		public @Nullable String getShader(ResourceLocation id, ShaderType type) {
 			return PackPipelines.this.sources.get(id);
 		}
 
 		@Override
-		public ShaderSource.@Nullable CachedIncludeSource getInclude(Identifier id) {
+		public ShaderSource.@Nullable CachedIncludeSource getInclude(ResourceLocation id) {
 			return null;
 		}
 
@@ -301,8 +301,8 @@ final class PackPipelines implements AutoCloseable {
 
 	private RenderPipeline.Builder builder(String label, String vertexSource, String fragmentSource, Set<String> blocks, Set<String> samplers) {
 		int id = NEXT.getAndIncrement();
-		Identifier vertex = Identifier.fromNamespaceAndPath("afterburner", "shaderpack/" + id + ".vsh");
-		Identifier fragment = Identifier.fromNamespaceAndPath("afterburner", "shaderpack/" + id + ".fsh");
+		ResourceLocation vertex = ResourceLocation.fromNamespaceAndPath("afterburner", "shaderpack/" + id + ".vsh");
+		ResourceLocation fragment = ResourceLocation.fromNamespaceAndPath("afterburner", "shaderpack/" + id + ".fsh");
 		this.sources.put(vertex, vertexSource);
 		this.sources.put(fragment, fragmentSource);
 		BindGroupLayout.Builder layout = BindGroupLayout.builder();
@@ -313,7 +313,7 @@ final class PackPipelines implements AutoCloseable {
 		}
 		String path = "shaderpack/" + id + "_" + label.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]+", "_");
 		return RenderPipeline.builder()
-			.withLocation(Identifier.fromNamespaceAndPath("afterburner", path))
+			.withLocation(ResourceLocation.fromNamespaceAndPath("afterburner", path))
 			.withVertexShader(vertex)
 			.withFragmentShader(fragment)
 			.withBindGroupLayout(layout.build());

@@ -21,7 +21,7 @@ import com.mojang.renderpearl.api.textures.GpuTextureView;
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.Optional;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Util;
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.system.MemoryUtil;
@@ -38,18 +38,18 @@ public final class Upscaler implements AutoCloseable {
 	private static final float SHARPNESS = 0.2F;
 	private static final int USAGE = GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_DST;
 
-	private static final Identifier VERTEX = Identifier.fromNamespaceAndPath("afterburner", "fsr/fullscreen.vsh");
-	private static final Identifier EASU = Identifier.fromNamespaceAndPath("afterburner", "fsr/easu.fsh");
-	private static final Identifier RCAS = Identifier.fromNamespaceAndPath("afterburner", "fsr/rcas.fsh");
-	private static final Map<Identifier, String> SOURCES = Map.of(VERTEX, UpscaleShaders.VERTEX, EASU, UpscaleShaders.EASU, RCAS, UpscaleShaders.RCAS);
+	private static final ResourceLocation VERTEX = ResourceLocation.fromNamespaceAndPath("afterburner", "fsr/fullscreen.vsh");
+	private static final ResourceLocation EASU = ResourceLocation.fromNamespaceAndPath("afterburner", "fsr/easu.fsh");
+	private static final ResourceLocation RCAS = ResourceLocation.fromNamespaceAndPath("afterburner", "fsr/rcas.fsh");
+	private static final Map<ResourceLocation, String> SOURCES = Map.of(VERTEX, UpscaleShaders.VERTEX, EASU, UpscaleShaders.EASU, RCAS, UpscaleShaders.RCAS);
 	private static final ShaderSource SHADERS = new ShaderSource() {
 		@Override
-		public @Nullable String getShader(Identifier id, ShaderType type) {
+		public @Nullable String getShader(ResourceLocation id, ShaderType type) {
 			return SOURCES.get(id);
 		}
 
 		@Override
-		public ShaderSource.@Nullable CachedIncludeSource getInclude(Identifier id) {
+		public ShaderSource.@Nullable CachedIncludeSource getInclude(ResourceLocation id) {
 			return null;
 		}
 
@@ -78,14 +78,14 @@ public final class Upscaler implements AutoCloseable {
 		this.constants = RenderSystem.getDevice().createBuffer(() -> "Afterburner upscale constants", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 16);
 	}
 
-	private static @Nullable CompiledRenderPipeline compile(String name, Identifier fragment, GpuFormat format) {
+	private static @Nullable CompiledRenderPipeline compile(String name, ResourceLocation fragment, GpuFormat format) {
 		BindGroupLayout layout = BindGroupLayout.builder()
 			.withUniform(UpscaleShaders.BLOCK, UniformType.UNIFORM_BUFFER)
 			.withUniform(UpscaleShaders.SAMPLER, UniformType.COMBINED_IMAGE_SAMPLER)
 			.build();
 		try {
 			RenderPipeline pipeline = RenderPipeline.builder()
-				.withLocation(Identifier.fromNamespaceAndPath("afterburner", "fsr/" + name))
+				.withLocation(ResourceLocation.fromNamespaceAndPath("afterburner", "fsr/" + name))
 				.withVertexShader(VERTEX)
 				.withFragmentShader(fragment)
 				.withBindGroupLayout(layout)

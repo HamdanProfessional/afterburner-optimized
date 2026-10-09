@@ -45,7 +45,7 @@ public abstract class ServerLevelTicksMixin implements TickWaker {
 	/** Its ticking future is done right after this returns, before the next tick's walk. */
 	@Inject(method = "startTickingChunk", at = @At("HEAD"))
 	private void afterburner$startsTicking(LevelChunk chunk, CallbackInfo ci) {
-		afterburner$wakeTicks(chunk.getPos().pack());
+		afterburner$wakeTicks(chunk.getPos().toLong());
 	}
 
 	@Override

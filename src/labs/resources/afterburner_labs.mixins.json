@@ -1,7 +1,7 @@
 {
 	"required": true,
 	"package": "com.afterburner.labs.mixin",
-	"compatibilityLevel": "JAVA_25",
+	"compatibilityLevel": "JAVA_21",
 	"plugin": "com.afterburner.labs.LabsMixinPlugin",
 	"client": [
 		"lod.ChunkSectionsAccessor",

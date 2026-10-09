@@ -2,7 +2,7 @@ package com.afterburner;
 
 import net.fabricmc.api.ModInitializer;
 
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,10 +13,10 @@ public class Afterburner implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
-		LOGGER.info("Afterburner loaded");
+		LOGGER.info(Mobile.ACTIVE ? "Afterburner loaded (phone or tablet: mobile defaults)" : "Afterburner loaded");
 	}
 
-	public static Identifier id(String path) {
-		return Identifier.fromNamespaceAndPath(MOD_ID, path);
+	public static ResourceLocation id(String path) {
+		return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
 	}
 }

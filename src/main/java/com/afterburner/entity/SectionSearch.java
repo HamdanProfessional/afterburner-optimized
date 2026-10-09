@@ -6,7 +6,7 @@ import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongSortedSet;
 import net.minecraft.core.SectionPos;
 import net.minecraft.util.AbortableIterationConsumer;
-import net.minecraft.util.Continuation;
+import net.minecraft.util.AbortableIterationConsumer.Continuation;
 import net.minecraft.world.level.entity.EntityAccess;
 import net.minecraft.world.level.entity.EntitySection;
 import net.minecraft.world.phys.AABB;

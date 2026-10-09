@@ -32,7 +32,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -385,7 +385,7 @@ public final class AutoBench {
 	 * is that biome, best first, nearest first among equals. Same world, same answer, so every run stands in the same spot.
 	 */
 	private static BlockPos inBiome(ServerLevel level, BlockPos from, String name) {
-		ResourceKey<Biome> key = ResourceKey.create(Registries.BIOME, Identifier.parse(name));
+		ResourceKey<Biome> key = ResourceKey.create(Registries.BIOME, ResourceLocation.parse(name));
 		int y = level.getSeaLevel();
 		BlockPos best = null;
 		int bestScore = 0;

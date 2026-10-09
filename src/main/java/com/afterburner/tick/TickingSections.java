@@ -13,15 +13,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * second array of its sections in which those with nothing that random-ticks are replaced by one empty section per world,
  * kept up to date whenever a section's counts change. The random tick loop walks that array instead: the same sections
  * tick in the same order, without each quiet one being read from memory.
- * <p>
- * The same feature also has the check whether a dimension has to keep running look where it found its reason last tick
- * first, instead of walking every chunk ticket (see {@code TicketStorageMixin}).
  */
 public final class TickingSections {
-	/** {@code -Dafterburner.checkChunkTicks=true}: each chunk's array is compared with its real sections every tick, and the dimension check with the full walk. */
+	/** {@code -Dafterburner.checkChunkTicks=true}: each chunk's array is compared with its real sections every tick. */
 	public static final boolean CHECK = Boolean.getBoolean("afterburner.checkChunkTicks");
 	private static final AtomicLong CHECKED = new AtomicLong(), DIFFERENT = new AtomicLong();
-	private static final AtomicLong KEEP_CHECKED = new AtomicLong(), KEEP_DIFFERENT = new AtomicLong();
 
 	private TickingSections() {
 	}
@@ -63,17 +59,8 @@ public final class TickingSections {
 		}
 	}
 
-	/** Check mode: the dimension check's answer next to the full walk's. */
-	public static void checkKeepActive(boolean ours, boolean vanilla) {
-		KEEP_CHECKED.incrementAndGet();
-		if (ours != vanilla && KEEP_DIFFERENT.incrementAndGet() <= 20) {
-			Afterburner.LOGGER.error("Chunk tick check failed: dimension kept active {}, vanilla {}", ours, vanilla);
-		}
-	}
-
-	/** For benchmark reports, e.g. "chunk tick check: 1,234 chunks compared, 0 different; dimension 40 compared, 0 different". */
+	/** For benchmark reports, e.g. "chunk tick check: 1,234 chunks compared, 0 different". */
 	public static String summary() {
-		return "chunk tick check: " + String.format("%,d", CHECKED.get()) + " chunks compared, " + DIFFERENT.get() + " different; dimension "
-				+ String.format("%,d", KEEP_CHECKED.get()) + " compared, " + KEEP_DIFFERENT.get() + " different";
+		return "chunk tick check: " + String.format("%,d", CHECKED.get()) + " chunks compared, " + DIFFERENT.get() + " different";
 	}
 }

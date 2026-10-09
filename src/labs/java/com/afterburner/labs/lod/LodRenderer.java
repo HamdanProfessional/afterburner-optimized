@@ -1,5 +1,6 @@
 package com.afterburner.labs.lod;
 
+import com.afterburner.Mobile;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.buffers.GpuBuffer;
@@ -31,7 +32,7 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.util.Mth;
 import net.minecraft.util.Util;
@@ -72,7 +73,8 @@ final class LodRenderer {
 	private static final int VERTEX_BYTES = 8;
 	/** A node is split into finer ones while the player is nearer than this many of its voxels. */
 	private static final int DETAIL = 256;
-	private static final long UPLOAD_BUDGET = 4L << 20;
+	/** Bytes uploaded per frame; less on phones, where the GL layer copies each upload once more. */
+	private static final long UPLOAD_BUDGET = (Mobile.ACTIVE ? 1L : 4L) << 20;
 	/** A built node whose chunks changed is rebuilt at most this often (nanoseconds, doubling per level up to 16 s). */
 	private static final long REBUILD_AFTER = 2_000_000_000L;
 	/** Added to a rebuild's priority, so places with nothing drawn yet come first. */
@@ -188,9 +190,9 @@ final class LodRenderer {
 	}
 
 	private static RenderPipeline.Builder terrain(String name) {
-		Identifier shader = Identifier.fromNamespaceAndPath("afterburner", "core/far_terrain");
+		ResourceLocation shader = ResourceLocation.fromNamespaceAndPath("afterburner", "core/far_terrain");
 		return RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
-				.withLocation(Identifier.fromNamespaceAndPath("afterburner", "pipeline/" + name))
+				.withLocation(ResourceLocation.fromNamespaceAndPath("afterburner", "pipeline/" + name))
 				.withBindGroupLayout(BindGroupLayouts.FOG)
 				.withBindGroupLayout(BindGroupLayouts.SAMPLER2)
 				.withBindGroupLayout(BindGroupLayouts.PROJECTION)
@@ -212,9 +214,9 @@ final class LodRenderer {
 	 */
 	static RenderPipeline floorPipeline() {
 		if (floorPipeline == null) {
-			Identifier shader = Identifier.fromNamespaceAndPath("afterburner", "core/far_water_floor");
+			ResourceLocation shader = ResourceLocation.fromNamespaceAndPath("afterburner", "core/far_water_floor");
 			floorPipeline = RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
-					.withLocation(Identifier.fromNamespaceAndPath("afterburner", "pipeline/far_water_floor"))
+					.withLocation(ResourceLocation.fromNamespaceAndPath("afterburner", "pipeline/far_water_floor"))
 					.withBindGroupLayout(BindGroupLayouts.TERRAIN_INFO)
 					.withBindGroupLayout(BindGroupLayout.builder()
 							.withUniform("LodNode", UniformType.UNIFORM_BUFFER)

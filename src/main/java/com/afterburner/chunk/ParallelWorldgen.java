@@ -1,7 +1,7 @@
 package com.afterburner.chunk;
 
+import net.minecraft.Util;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.Util;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
@@ -48,8 +48,8 @@ public final class ParallelWorldgen {
 			try {
 				return work.get();
 			} catch (RuntimeException e) {
-				throw new IllegalStateException("Generating " + step.targetStatus().getName() + " for chunk " + pos.x()
-						+ ", " + pos.z() + " failed (Afterburner runs this step in parallel; -Dafterburner.parallelWorldgen=false turns that off)", e);
+				throw new IllegalStateException("Generating " + step.targetStatus().getName() + " for chunk " + pos.x
+						+ ", " + pos.z + " failed (Afterburner runs this step in parallel; -Dafterburner.parallelWorldgen=false turns that off)", e);
 			}
 		});
 	}

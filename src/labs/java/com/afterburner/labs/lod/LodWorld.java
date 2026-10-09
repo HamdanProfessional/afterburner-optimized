@@ -8,7 +8,7 @@ import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -56,8 +56,8 @@ final class LodWorld {
 	private final @Nullable BlockState[] recentStates = new BlockState[256];
 	private final int[] recentCells = new int[256];
 	private int savedStates;
-	private final List<Identifier> biomeNames = new ArrayList<>();
-	private final Object2IntOpenHashMap<Identifier> biomeIds = new Object2IntOpenHashMap<>();
+	private final List<ResourceLocation> biomeNames = new ArrayList<>();
+	private final Object2IntOpenHashMap<ResourceLocation> biomeIds = new Object2IntOpenHashMap<>();
 	private @Nullable Biome[] biomes = new Biome[16];
 	private int savedBiomes;
 
@@ -148,7 +148,7 @@ final class LodWorld {
 		return m - 1;
 	}
 
-	int biomeId(Identifier name) {
+	int biomeId(ResourceLocation name) {
 		int id = biomeIds.getInt(name);
 		if (id < 0) {
 			id = biomeNames.size();
@@ -166,7 +166,7 @@ final class LodWorld {
 		Biome b = biomes[id];
 		if (b == null) {
 			b = biomeRegistry.getValue(biomeNames.get(id));
-			if (b == null) b = biomeRegistry.getValue(Identifier.withDefaultNamespace("plains"));
+			if (b == null) b = biomeRegistry.getValue(ResourceLocation.withDefaultNamespace("plains"));
 			biomes[id] = b;
 		}
 		return b;
@@ -193,8 +193,8 @@ final class LodWorld {
 			Path biomeFile = folder.resolve("biomes.txt");
 			if (Files.exists(biomeFile)) {
 				for (String line : Files.readAllLines(biomeFile, StandardCharsets.UTF_8)) {
-					Identifier name = Identifier.tryParse(line.strip());
-					if (name == null) name = Identifier.withDefaultNamespace("plains");
+					ResourceLocation name = ResourceLocation.tryParse(line.strip());
+					if (name == null) name = ResourceLocation.withDefaultNamespace("plains");
 					biomeNames.add(name);
 					biomeIds.putIfAbsent(name, biomeNames.size() - 1);
 				}
@@ -309,7 +309,7 @@ final class LodWorld {
 			}
 			if (biomeNames.size() > savedBiomes) {
 				List<String> lines = new ArrayList<>(biomeNames.size());
-				for (Identifier name : biomeNames) lines.add(name.toString());
+				for (ResourceLocation name : biomeNames) lines.add(name.toString());
 				writeAtomically(folder.resolve("biomes.txt"), String.join("\n", lines).getBytes(StandardCharsets.UTF_8));
 				savedBiomes = biomeNames.size();
 			}

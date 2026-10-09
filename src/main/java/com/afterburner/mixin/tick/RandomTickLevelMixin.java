@@ -3,6 +3,7 @@ package com.afterburner.mixin.tick;
 import com.afterburner.tick.TickingSections;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -27,7 +28,9 @@ public abstract class RandomTickLevelMixin implements TickingSections.Quiet {
 	@Override
 	public LevelChunkSection afterburner$quietSection() {
 		LevelChunkSection quiet = afterburner$quiet;
-		if (quiet == null) afterburner$quiet = quiet = new LevelChunkSection(((ServerLevel) (Object) this).palettedContainerFactory());
+		if (quiet == null) {
+			afterburner$quiet = quiet = new LevelChunkSection(((ServerLevel) (Object) this).registryAccess().registryOrThrow(Registries.BIOME));
+		}
 		return quiet;
 	}
 }

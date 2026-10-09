@@ -41,7 +41,7 @@ public abstract class BlockLightEngineMixin extends LightEngine {
 	 */
 	@Overwrite
 	@Override
-	protected void propagateIncrease(long fromNode, long increaseData, int fromLevel) {
+	public void propagateIncrease(long fromNode, long increaseData, int fromLevel) {
 		LightStorageAccess light = (LightStorageAccess) storage;
 		BlockState fromState = null;
 		int fx = BlockPos.getX(fromNode), fy = BlockPos.getY(fromNode), fz = BlockPos.getZ(fromNode);
@@ -55,13 +55,13 @@ public abstract class BlockLightEngineMixin extends LightEngine {
 			int toLevel = layer.get(tx & 15, ty & 15, tz & 15);
 			if (fromLevel - 1 <= toLevel) continue;
 			BlockState toState = getState(mutablePos.set(tx, ty, tz));
-			int newToLevel = fromLevel - getOpacity(toState);
+			int newToLevel = fromLevel - getOpacity(toState, mutablePos);
 			if (newToLevel <= toLevel) continue;
 			if (fromState == null) {
 				fromState = LightEngine.QueueEntry.isFromEmptyShape(increaseData) ? Blocks.AIR.defaultBlockState() : getState(mutablePos.set(fx, fy, fz));
 			}
-			if (shapeOccludes(fromState, toState, direction)) continue;
 			long toNode = BlockPos.asLong(tx, ty, tz);
+			if (shapeOccludes(fromNode, fromState, toNode, toState, direction)) continue;
 			light.afterburner$set(toNode, newToLevel);
 			if (newToLevel > 1) {
 				enqueueIncrease(toNode, LightEngine.QueueEntry.increaseSkipOneDirection(newToLevel, isEmptyShape(toState), direction.getOpposite()));
@@ -75,7 +75,7 @@ public abstract class BlockLightEngineMixin extends LightEngine {
 	 */
 	@Overwrite
 	@Override
-	protected void propagateDecrease(long fromNode, long decreaseData) {
+	public void propagateDecrease(long fromNode, long decreaseData) {
 		LightStorageAccess light = (LightStorageAccess) storage;
 		int oldFromLevel = LightEngine.QueueEntry.getFromLevel(decreaseData);
 		int fx = BlockPos.getX(fromNode), fy = BlockPos.getY(fromNode), fz = BlockPos.getZ(fromNode);

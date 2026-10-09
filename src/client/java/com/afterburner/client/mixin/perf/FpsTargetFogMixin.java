@@ -1,18 +1,18 @@
 package com.afterburner.client.mixin.perf;
 
 import com.afterburner.client.perf.FpsTarget;
-import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.LevelRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
 /** The render distance fog comes in to where {@link FpsTarget} draws chunks to. */
-@Mixin(GameRenderer.class)
+@Mixin(LevelRenderer.class)
 public class FpsTargetFogMixin {
-	@ModifyArg(method = "extractCamera", at = @At(value = "INVOKE",
-			target = "Lnet/minecraft/client/renderer/fog/FogRenderer;setupFog(Lnet/minecraft/client/Camera;ILnet/minecraft/client/DeltaTracker;FLnet/minecraft/client/multiplayer/ClientLevel;)Lnet/minecraft/client/renderer/fog/FogData;"),
-			index = 1)
-	private int afterburner$fogDistance(int renderDistance) {
-		return FpsTarget.fogDistance(renderDistance);
+	@ModifyArg(method = "renderLevel", at = @At(value = "INVOKE",
+			target = "Lnet/minecraft/client/renderer/FogRenderer;setupFog(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/FogRenderer$FogMode;FZF)V"),
+			index = 2)
+	private float afterburner$fogDistance(float renderDistance) {
+		return Math.max(FpsTarget.fogDistance((int) renderDistance >> 4) * 16.0F, 32.0F);
 	}
 }

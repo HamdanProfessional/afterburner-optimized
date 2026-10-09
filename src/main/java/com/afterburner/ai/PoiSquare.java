@@ -102,7 +102,7 @@ public final class PoiSquare extends Spliterators.AbstractSpliterator<PoiRecord>
 			Optional<?> found = column != null ? column[index] : null;
 			if (found == null) {
 				found = storage.afterburner$getOrLoad(SectionPos.asLong(chunkX, minSection + index, chunkZ));
-				column = storage.afterburner$column(ChunkPos.pack(chunkX, chunkZ));
+				column = storage.afterburner$column(ChunkPos.asLong(chunkX, chunkZ));
 			}
 			if (found.isPresent()) {
 				typeIterator = ((PoiSectionAccessor) (PoiSection) found.get()).afterburner$byType().entrySet().iterator();
@@ -124,7 +124,7 @@ public final class PoiSquare extends Spliterators.AbstractSpliterator<PoiRecord>
 			chunkX++;
 		}
 		section = 0;
-		column = storage.afterburner$column(ChunkPos.pack(chunkX, chunkZ));
+		column = storage.afterburner$column(ChunkPos.asLong(chunkX, chunkZ));
 		return true;
 	}
 }

@@ -34,7 +34,7 @@ final class ChunkLocks {
 	}
 
 	<T> CompletableFuture<T> run(ChunkPos center, int writeRadius, int readRadius, Supplier<CompletableFuture<T>> work) {
-		Job<T> job = new Job<>(center.x(), center.z(), writeRadius, Math.max(writeRadius, readRadius), work);
+		Job<T> job = new Job<>(center.x, center.z, writeRadius, Math.max(writeRadius, readRadius), work);
 		List<Job<?>> ready;
 		synchronized (this) {
 			waiting.add(job);
@@ -65,7 +65,7 @@ final class ChunkLocks {
 	private boolean canStart(Job<?> job) {
 		for (int dz = -job.read; dz <= job.read; dz++) {
 			for (int dx = -job.read; dx <= job.read; dx++) {
-				long pos = ChunkPos.pack(job.x + dx, job.z + dz);
+				long pos = ChunkPos.asLong(job.x + dx, job.z + dz);
 				if (writing.contains(pos)) return false;
 				if (job.writes(dx, dz) && reading.get(pos) > 0) return false;
 			}
@@ -76,7 +76,7 @@ final class ChunkLocks {
 	private void claim(Job<?> job, boolean take) {
 		for (int dz = -job.read; dz <= job.read; dz++) {
 			for (int dx = -job.read; dx <= job.read; dx++) {
-				long pos = ChunkPos.pack(job.x + dx, job.z + dz);
+				long pos = ChunkPos.asLong(job.x + dx, job.z + dz);
 				if (job.writes(dx, dz)) {
 					if (take) writing.add(pos);
 					else writing.remove(pos);

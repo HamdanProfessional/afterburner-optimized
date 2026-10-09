@@ -53,7 +53,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 	@Override
 	protected void addOptions() {
 		buttons.clear();
-		list.addHeader(Component.translatable("afterburner.group.fpsTarget").withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD));
+		list.addSmall(List.of(new StringWidget(Component.translatable("afterburner.group.fpsTarget").withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
 		list.addBig(fpsTargetSlider());
 		Addons.addSettings(new Rows() {
 			@Override
@@ -63,7 +63,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 
 			@Override
 			public void header(String key) {
-				list.addHeader(Component.translatable(key).withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD));
+				list.addSmall(List.of(new StringWidget(Component.translatable(key).withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
 			}
 
 			@Override
@@ -73,7 +73,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 
 			@Override
 			public void add(AbstractWidget widget) {
-				list.addBig(widget);
+				list.addSmall(List.of(widget));
 			}
 		});
 		Features.Group group = null;
@@ -82,12 +82,12 @@ public final class SettingsScreen extends OptionsSubScreen {
 			if (f.group() != group) {
 				addRow(row);
 				group = f.group();
-				list.addHeader(Component.translatable("afterburner.group." + group.name().toLowerCase(Locale.ROOT))
-						.withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD));
+				list.addSmall(List.of(new StringWidget(Component.translatable("afterburner.group." + group.name().toLowerCase(Locale.ROOT))
+						.withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
 			}
 			Tooltip tooltip = tooltip(f);
 			OptionInstance<Boolean> button = OptionInstance.createBoolean("afterburner.option." + f.key(), value -> tooltip,
-					locked(f) ? f.enabled() : Settings.get(f.key()), value -> changed(f, value));
+					locked(f) ? f.enabled() : Settings.get(f), value -> changed(f, value));
 			buttons.put(f, button);
 			row.add(button);
 		}
@@ -142,9 +142,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 		for (Features f : Features.values()) {
 			if (!locked(f)) changed(f, true);
 		}
-		layout.removeChildren();
-		header.removeChildren();
-		rebuildWidgets();
+		// On 1.21.1 rebuilding the list in place isn't supported by vanilla's layout: make the page anew.
+		minecraft.setScreen(new SettingsScreen(lastScreen, minecraft.options));
 	}
 
 	/** Greys out the buttons that can't do anything now, and shows the restart line when it's needed. */
@@ -171,7 +170,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 	/** Whether it will be on after the next restart, as the settings stand. */
 	private static boolean atStart(Features f) {
 		if (locked(f)) return f.enabled();
-		return Settings.get(f.key()) && (f.needs() == null || atStart(f.needs()));
+		return Settings.get(f) && (f.needs() == null || atStart(f.needs()));
 	}
 
 	private static boolean restartNeeded() {

@@ -67,7 +67,7 @@ public abstract class LayerLightSectionStorageMixin<M extends DataLayerStorageMa
 	 * @reason Skip the hash sets for sections already added to them.
 	 */
 	@Overwrite
-	protected void setStoredLevel(long blockNode, int level) {
+	public void setStoredLevel(long blockNode, int level) {
 		int x = BlockPos.getX(blockNode), y = BlockPos.getY(blockNode), z = BlockPos.getZ(blockNode);
 		int sx = SectionPos.blockToSectionCoord(x), sy = SectionPos.blockToSectionCoord(y), sz = SectionPos.blockToSectionCoord(z);
 		long sectionNode = SectionPos.asLong(sx, sy, sz);

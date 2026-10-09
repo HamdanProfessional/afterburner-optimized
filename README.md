@@ -10,6 +10,11 @@ and others), Afterburner leaves that part to it. The full list, with what each o
 
 Needs Fabric Loader 0.19.5+, Fabric API and Java 25. Works on a client or a server alone.
 
+On phones and tablets (Android launchers such as PojavLauncher, Zalith or FCL) some settings start lower: occlusion and
+entity culling start off (their test is slow on phone GPUs), the FPS target starts at 30, far terrain reaches 48 chunks,
+and memory is given back sooner when the game is paused. Anything can be changed back in the settings.
+`-Dafterburner.mobile=true` or `false` overrides the detection.
+
 ## Building
 
 ```
@@ -41,6 +46,10 @@ culling) was also done with AI.
 - [Sodium](https://github.com/CaffeineMC/sodium): the rendering optimizations (region batching, the compact vertex
   format, face culling, animating only visible textures) follow Sodium's design, rebuilt on Minecraft's own renderer. No
   Sodium code is used, and Afterburner turns these off when Sodium is installed.
+- [Lithium](https://github.com/CaffeineMC/lithium) and [FerriteCore](https://github.com/malte0811/FerriteCore): sleeping
+  idle furnaces and campfires, the explosion block cache, fewer redstone dust reads and shared block shapes follow their
+  ideas, written anew for 26.3. No code from either is used, and these turn off when the mod they come from is
+  installed.
 - [Iris](https://github.com/IrisShaders/Iris): the shader pack loader in `src/labs` aims to behave like Iris
   so packs work the same. No Iris code is used, and it turns off when Iris is installed.
 - Octahedral normals: Cigolle et al. (2014) and K. Narkowicz (2014). Tangents: E. Lengyel (2001).

@@ -2,7 +2,7 @@ package com.afterburner.labs.lod;
 
 import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Blocks;
@@ -22,7 +22,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class LodSnapshot {
 	private static final DataLayer FULL_SKY = new DataLayer(15), DARK = new DataLayer(0);
-	private static final Identifier PLAINS = Identifier.withDefaultNamespace("plains");
+	private static final ResourceLocation PLAINS = ResourceLocation.withDefaultNamespace("plains");
 
 	final LodWorld world;
 	final int cx, cz;
@@ -33,7 +33,7 @@ final class LodSnapshot {
 	/** Per section: block light, null for none. */
 	private final @Nullable DataLayer[] blockLight;
 	/** Per 4 x 4 columns (z * 4 + x): the biome at the surface. */
-	private final Identifier[] biomes = new Identifier[16];
+	private final ResourceLocation[] biomes = new ResourceLocation[16];
 	/** Roughly the memory the copy takes, for {@link LodWorker}'s limit. */
 	final long bytes;
 
@@ -218,7 +218,7 @@ final class LodSnapshot {
 				if (count == runs.length) runs = java.util.Arrays.copyOf(runs, count * 2);
 				runs[count++] = LodSheet.run(runWhat, runTop);
 				sheet.columns[z * 16 + x] = java.util.Arrays.copyOf(runs, count);
-				Identifier biome = biomes[(z >> 2) * 4 + (x >> 2)];
+				ResourceLocation biome = biomes[(z >> 2) * 4 + (x >> 2)];
 				sheet.biomes[z * 16 + x] = world.biomeId(biome);
 			}
 		}

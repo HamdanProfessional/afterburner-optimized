@@ -1,0 +1,8 @@
+accessWidener	v2	named
+
+accessible	class	net/minecraft/client/renderer/SectionOcclusionGraph$GraphStorage
+accessible	class	net/minecraft/client/renderer/SectionOcclusionGraph$SectionToNodeMap
+accessible	class	net/minecraft/world/level/biome/Biome$ClimateSettings
+accessible	field	net/minecraft/world/level/biome/Biome	climateSettings	Lnet/minecraft/world/level/biome/Biome$ClimateSettings;
+accessible	field	net/minecraft/world/level/chunk/ChunkAccess	levelHeightAccessor	Lnet/minecraft/world/level/LevelHeightAccessor;
+accessible	method	net/minecraft/world/level/NaturalSpawner	getRoughBiome	(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/chunk/ChunkAccess;)Lnet/minecraft/world/level/biome/Biome;

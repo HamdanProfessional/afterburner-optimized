@@ -27,11 +27,12 @@
 			"environment": "client"
 		}
 	],
-	"accessWidener": "afterburner.classtweaker",
+	"accessWidener": "afterburner.accesswidener",
 	"depends": {
-		"fabricloader": ">=0.19.5",
-		"minecraft": "~26.3",
-		"java": ">=25",
-		"fabric-api": "*"
+		"fabricloader": ">=0.16.0",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-lifecycle-events-v1": "*",
+		"fabric-command-api-v2": "*"
 	}
 }

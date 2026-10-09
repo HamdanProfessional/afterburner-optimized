@@ -1,5 +1,6 @@
 package com.afterburner.labs.lod;
 
+import com.afterburner.Mobile;
 import com.afterburner.client.perf.FpsTarget;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
@@ -22,7 +23,8 @@ public final class LodSettings {
 	private static final Path CONFIG = FabricLoader.getInstance().getConfigDir().resolve("afterburner-lod.properties");
 	/** The choices, in chunks: 0 (off), or {@link #MIN} to {@link #MAX} in steps of {@link #STEP}. */
 	public static final int MIN = 16, MAX = 1024, STEP = 16;
-	private static final int DEFAULT = 128;
+	/** Nearer on phones and tablets, whose GPU and memory are smaller. */
+	private static final int DEFAULT = Mobile.ACTIVE ? 48 : 128;
 	private static int distance = DEFAULT;
 	private static volatile boolean unseenLand = true;
 

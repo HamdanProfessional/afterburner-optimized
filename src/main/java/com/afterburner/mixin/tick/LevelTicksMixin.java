@@ -118,11 +118,11 @@ public abstract class LevelTicksMixin<T> implements ParkedTicks {
 
 	@Inject(method = "addContainer", at = @At("HEAD"))
 	private void afterburner$added(ChunkPos pos, LevelChunkTicks<T> container, CallbackInfo ci) {
-		if (!afterburner$parked.isEmpty()) afterburner$parked.remove(pos.pack());
+		if (!afterburner$parked.isEmpty()) afterburner$parked.remove(pos.toLong());
 	}
 
 	@Inject(method = "removeContainer", at = @At("HEAD"))
 	private void afterburner$removed(ChunkPos pos, CallbackInfo ci) {
-		if (!afterburner$parked.isEmpty()) afterburner$parked.remove(pos.pack());
+		if (!afterburner$parked.isEmpty()) afterburner$parked.remove(pos.toLong());
 	}
 }
