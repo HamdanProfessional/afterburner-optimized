@@ -1,5 +1,6 @@
 package com.afterburner;
 
+import net.fabricmc.loader.api.FabricLoader;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
@@ -125,7 +126,13 @@ public class AfterburnerMixinPlugin implements IMixinConfigPlugin {
 
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-		Features feature = MIXINS.get(mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1));
+		String name = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
+		// The FPS target's shorter draw distance cuts vanilla's section lists, which Sodium doesn't use: its fog would come in
+		// with nothing left out, so both stay out with Sodium.
+		if ((name.equals("FpsTargetExtractMixin") || name.equals("FpsTargetFogMixin")) && FabricLoader.getInstance().isModLoaded("sodium")) {
+			return false;
+		}
+		Features feature = MIXINS.get(name);
 		if ((feature == Features.COMPACT_VERTICES || feature == Features.OCCLUSION_CULLING || feature == Features.ENTITY_CULLING
 				|| feature == Features.TRANSLUCENT_CULLING || feature == Features.VISIBLE_ANIMATIONS)
 				&& !Features.CHUNK_BATCHING.enabled()) {
