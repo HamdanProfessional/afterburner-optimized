@@ -1,0 +1,41 @@
+{
+	"required": true,
+	"package": "com.afterburner.labs.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"plugin": "com.afterburner.labs.LabsMixinPlugin",
+	"client": [
+		"lod.ChunkSectionsAccessor",
+		"lod.LodCameraMixin",
+		"lod.LodFogMixin",
+		"lod.LodLevelRendererMixin",
+		"lod.LodMinecraftMixin",
+		"lod.LodSectionMixin",
+		"lod.SpriteContentsAccessor",
+		"lod.TextureAtlasAccessor",
+		"render.RenderTargetAccessor",
+		"render.WorldScaleMixin",
+		"shader.ExternalDescriptorsMixin",
+		"shader.ExternalSourceMixin",
+		"shader.ExternalUnitsMixin",
+		"shader.GlContextVersionMixin",
+		"shader.GlProgramAccessor",
+		"shader.LinkerWindowEventsMixin",
+		"shader.PackGameRendererMixin",
+		"shader.PackLayeringMixin",
+		"shader.PackLevelExtractorMixin",
+		"shader.PackLevelRendererMixin",
+		"shader.PackPassMixin",
+		"shader.PackPipelineMixin",
+		"shader.PackPreparedFrameMixin",
+		"shader.PipelineCacheMixin",
+		"shader.ProgramLinkMixin",
+		"shader.SkyStageMixin",
+		"shader.TextureUnitsMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

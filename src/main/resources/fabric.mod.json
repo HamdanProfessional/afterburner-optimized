@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "afterburner",
+	"version": "${version}",
+	"name": "Afterburner",
+	"description": "Makes Minecraft run faster.",
+	"authors": [
+		"Hamdan"
+	],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.afterburner.Afterburner"
+		],
+		"client": [
+			"com.afterburner.client.AfterburnerClient"
+		],
+		"sodium:config_api_user": [
+			"com.afterburner.client.gui.SodiumSettingsPage"
+		]
+	},
+	"mixins": [
+		"afterburner.mixins.json",
+		{
+			"config": "afterburner.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"accessWidener": "afterburner.classtweaker",
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

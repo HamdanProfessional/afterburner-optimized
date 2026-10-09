@@ -1,0 +1,29 @@
+{
+	"required": true,
+	"package": "com.afterburner.bench.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"LightStatsMixin"
+	],
+	"client": [
+		"client.BenchFrameMixin",
+		"client.BenchKeyboardMixin",
+		"client.BenchMouseMixin",
+		"client.BuildCountMixin",
+		"client.BuildLogMixin",
+		"client.BuildTimeMixin",
+		"client.FrameSectionsMixin",
+		"client.FrameWaitsMixin",
+		"client.GpuTimerFrameGraphMixin",
+		"client.GpuTimerGameRendererMixin",
+		"client.GpuTimerMinecraftMixin",
+		"client.GpuTimerTerrainMixin",
+		"client.VisibilityTimeMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

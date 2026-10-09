@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "afterburner_labs",
+	"version": "${version}",
+	"name": "Afterburner Labs",
+	"description": "Afterburner's unreleased work in progress: a shader pack loader, upscaling and far terrain. For testing, not for play.",
+	"authors": [
+		"Hamdan"
+	],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.afterburner.labs.Labs"
+		],
+		"client": [
+			"com.afterburner.labs.LabsClient"
+		],
+		"afterburner": [
+			"com.afterburner.labs.LabsAddon"
+		]
+	},
+	"mixins": [
+		{
+			"config": "afterburner_labs.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"afterburner": "*",
+		"afterburner_bench": "*",
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

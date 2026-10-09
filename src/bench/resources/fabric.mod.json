@@ -1,0 +1,30 @@
+{
+	"schemaVersion": 1,
+	"id": "afterburner_bench",
+	"version": "${version}",
+	"name": "Afterburner Bench",
+	"description": "The benchmark and check commands used while developing Afterburner. For testing, not for play.",
+	"authors": [
+		"Hamdan"
+	],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.afterburner.bench.Bench"
+		],
+		"client": [
+			"com.afterburner.bench.client.BenchClient"
+		]
+	},
+	"mixins": [
+		"afterburner_bench.mixins.json"
+	],
+	"depends": {
+		"afterburner": "*",
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
