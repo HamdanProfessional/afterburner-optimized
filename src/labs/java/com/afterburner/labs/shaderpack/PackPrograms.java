@@ -18,7 +18,7 @@ import org.jspecify.annotations.Nullable;
  * Compute programs are found as Iris has them: {@code <pass>.csh} and {@code <pass>_a.csh} to {@code <pass>_z.csh}, run in that
  * order before the pass's own program (if it has one).
  */
-public final class ProgramSet {
+public final class PackPrograms {
 	public record Source(String name, String vertex, String fragment) {}
 
 	/** Program to the one used when it's missing; null ends the chain (nothing drawn with a pack program: vanilla stays). */
@@ -80,7 +80,7 @@ public final class ProgramSet {
 	/** Pass name to its compute programs' files, in the order they run. */
 	private final Map<String, List<String>> computes = new LinkedHashMap<>();
 
-	private ProgramSet(String folder) {
+	private PackPrograms(String folder) {
 		this.folder = folder;
 	}
 
@@ -88,8 +88,8 @@ public final class ProgramSet {
 	 * Finds the programs. {@code folder} is the dimension's folder ("world0"), or "" for the root only; {@code enabled} gets
 	 * {@code program.*.enabled} keys and says whether a program may be used.
 	 */
-	public static ProgramSet load(PackFiles pack, String folder, Predicate<String> enabled) throws IOException {
-		ProgramSet set = new ProgramSet(folder);
+	public static PackPrograms load(PackFiles pack, String folder, Predicate<String> enabled) throws IOException {
+		PackPrograms set = new PackPrograms(folder);
 		List<String> names = new ArrayList<>(FALLBACKS.keySet());
 		for (String group : PASS_GROUPS) {
 			names.add(group);
@@ -182,9 +182,9 @@ public final class ProgramSet {
 	 * ({@code dimension.world0 = minecraft:overworld}); without it the usual world0, world-1 and world1. Returns "" when the
 	 * pack has no folder for it.
 	 */
-	public static String dimensionFolder(PackFiles pack, @Nullable ShaderProperties dimensions, String dimensionId) throws IOException {
+	public static String dimensionFolder(PackFiles pack, @Nullable PackProperties dimensions, String dimensionId) throws IOException {
 		if (dimensions != null) {
-			for (ShaderProperties.Entry e : dimensions.withPrefix("dimension.")) {
+			for (PackProperties.Entry e : dimensions.withPrefix("dimension.")) {
 				for (String id : e.value().split("[\\s,]+")) {
 					if (id.equals(dimensionId) || (id.equals("*") && !dimensionId.isEmpty())) return e.key().substring("dimension.".length());
 				}

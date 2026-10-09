@@ -38,7 +38,7 @@ import java.util.Set;
  * file, as OptiFine shows them. Left click goes to an option's next value, right click to the one before. Changes are saved
  * to shaderpacks/&lt;pack&gt;.txt and the pack loaded again on Apply, or when the page closes.
  */
-public final class ShaderPackScreen extends OptionsSubScreen {
+public final class PacksScreen extends OptionsSubScreen {
 	private static final Component TITLE = Component.translatable("afterburner.shaders.title");
 	private static final int SMALL = 150;
 
@@ -55,7 +55,7 @@ public final class ShaderPackScreen extends OptionsSubScreen {
 	private @Nullable Button profileButton;
 	private @Nullable Button applyButton;
 
-	public ShaderPackScreen(Screen lastScreen, Options options) {
+	public PacksScreen(Screen lastScreen, Options options) {
 		super(lastScreen, options, TITLE);
 	}
 

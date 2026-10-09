@@ -11,17 +11,17 @@ import org.jspecify.annotations.Nullable;
  * properties syntax, but keys keep their file order (custom uniforms and variables are defined in order) and a key given twice
  * keeps its last value in its first place.
  */
-public final class ShaderProperties {
+public final class PackProperties {
 	public record Entry(String key, String value, String origin) {}
 
 	private final Map<String, Entry> entries = new LinkedHashMap<>();
 
-	private ShaderProperties() {
+	private PackProperties() {
 	}
 
 	/** Parses preprocessed lines (continuations already joined). */
-	public static ShaderProperties parse(GlslPreprocessor.Result source) {
-		ShaderProperties out = new ShaderProperties();
+	public static PackProperties parse(GlslPreprocessor.Result source) {
+		PackProperties out = new PackProperties();
 		for (int i = 0; i < source.lines.size(); i++) {
 			String line = source.lines.get(i).strip();
 			if (line.isEmpty() || line.startsWith("#") || line.startsWith("!")) continue;

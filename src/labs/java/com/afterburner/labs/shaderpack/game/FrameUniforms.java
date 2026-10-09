@@ -1,7 +1,7 @@
 package com.afterburner.labs.shaderpack.game;
 
 import com.afterburner.labs.lod.Lod;
-import com.afterburner.labs.shaderpack.CustomUniforms;
+import com.afterburner.labs.shaderpack.PackUniforms;
 import com.afterburner.labs.shaderpack.TranslateTarget;
 import java.util.HashMap;
 import java.util.Map;
@@ -38,12 +38,12 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * OptiFine's standard uniforms for one frame (worldTime, sunPosition, gbufferModelView, eyeBrightnessSmooth, ...), as
- * {@link CustomUniforms.Inputs}: what custom uniforms read and what the uniform blocks are filled with.
+ * {@link PackUniforms.Inputs}: what custom uniforms read and what the uniform blocks are filled with.
  * <p>
  * Matrices follow OptiFine: gbufferModelView is the camera's rotation (world geometry is drawn camera-relative), gbufferProjection
  * a normal OpenGL projection (near -1, far 1), not the game's reversed one.
  */
-public final class FrameUniforms implements CustomUniforms.Inputs {
+public final class FrameUniforms implements PackUniforms.Inputs {
 	/** Turns the game's reversed-depth projection into an OpenGL one; the CPU side of the translator's ab_ToGl. */
 	public static Matrix4f toGl(boolean zeroToOne) {
 		return zeroToOne

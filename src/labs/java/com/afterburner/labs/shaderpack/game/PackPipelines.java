@@ -1,6 +1,6 @@
 package com.afterburner.labs.shaderpack.game;
 
-import com.afterburner.labs.shaderpack.AlphaTest;
+import com.afterburner.labs.shaderpack.AlphaCutoff;
 import com.afterburner.labs.shaderpack.GlslTranslator;
 import com.afterburner.labs.shaderpack.PackBlending;
 import com.afterburner.labs.shaderpack.PackLoader;
@@ -213,7 +213,7 @@ final class PackPipelines implements AutoCloseable {
 			kind == PackPass.Kind.HAND, Map.of(), attachments);
 		// What the game cuts out (leaves, grass, item edges), OptiFine's alpha test does for the pack; old programs count on it.
 		// The pack's own for the program, else where the game cuts out.
-		AlphaTest test = this.pack.alphaTests.get(program.name());
+		AlphaCutoff test = this.pack.alphaTests.get(program.name());
 		if (test == null) test = ProgramMapping.alphaTest(path, kind, vanilla.getShaderDefines().values().get("ALPHA_CUTOUT"));
 		target = target.withAlphaTest(test);
 		String label = program.name() + " for " + vanilla.getLocation();

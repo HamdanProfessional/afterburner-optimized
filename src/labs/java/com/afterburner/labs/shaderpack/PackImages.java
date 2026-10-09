@@ -73,10 +73,10 @@ public final class PackImages {
 		return null;
 	}
 
-	public static PackImages parse(ShaderProperties properties, Map<String, GlslPreprocessor.Macro> options) {
+	public static PackImages parse(PackProperties properties, Map<String, GlslPreprocessor.Macro> options) {
 		List<String> warnings = new ArrayList<>();
 		Map<String, Image> images = new LinkedHashMap<>();
-		for (ShaderProperties.Entry e : properties.withPrefix("image.")) {
+		for (PackProperties.Entry e : properties.withPrefix("image.")) {
 			String name = e.key().substring("image.".length()).strip();
 			String[] v = expand(e.value(), options).strip().split("\\s+");
 			try {
@@ -103,7 +103,7 @@ public final class PackImages {
 		}
 
 		Map<Integer, Buffer> buffers = new LinkedHashMap<>();
-		for (ShaderProperties.Entry e : properties.withPrefix("bufferObject.")) {
+		for (PackProperties.Entry e : properties.withPrefix("bufferObject.")) {
 			String[] v = expand(e.value(), options).strip().split("\\s+");
 			try {
 				int index = Integer.parseInt(e.key().substring("bufferObject.".length()).strip());

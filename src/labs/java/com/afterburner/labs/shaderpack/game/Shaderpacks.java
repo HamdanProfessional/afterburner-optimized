@@ -5,7 +5,7 @@ import com.afterburner.client.render.TerrainExtras;
 import com.afterburner.labs.shaderpack.PackFiles;
 import com.afterburner.labs.shaderpack.PackLoader;
 import com.afterburner.labs.shaderpack.PackOptions;
-import com.afterburner.labs.shaderpack.StandardMacros;
+import com.afterburner.labs.shaderpack.PackMacros;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
@@ -188,10 +188,10 @@ public final class Shaderpacks {
 	/** {@code farTerrain}: with Distant Horizons' macros, for the pack to draw Afterburner's far terrain. */
 	private static Map<String, String> macros(Minecraft mc, boolean farTerrain) {
 		DeviceInfo device = RenderSystem.getDevice().getDeviceInfo();
-		Map<String, String> macros = StandardMacros.of(device.vendorName(), device.name(), mc.options.mipmapLevels().get());
-		if (device.backendName().equals("OpenGL") && PackStorage.supported()) StandardMacros.addIris(macros);
-		if (farTerrain) StandardMacros.addFarTerrain(macros);
-		StandardMacros.addBiomes(macros, PackBiomes.names());
+		Map<String, String> macros = PackMacros.of(device.vendorName(), device.name(), mc.options.mipmapLevels().get());
+		if (device.backendName().equals("OpenGL") && PackStorage.supported()) PackMacros.addIris(macros);
+		if (farTerrain) PackMacros.addFarTerrain(macros);
+		PackMacros.addBiomes(macros, PackBiomes.names());
 		return macros;
 	}
 
@@ -303,7 +303,7 @@ public final class Shaderpacks {
 			// The player's choice of the pack's options: their lines are rewritten as the files are read.
 			Map<String, String> chosen = PackOptions.readValues(optionsFile(selected));
 			if (!chosen.isEmpty()) files.rewriteWith(PackOptions.read(files, macros).rewriter(chosen));
-			PackLoader.Loaded loaded = PackLoader.load(files, dimension, macros, StandardMacros.addBiomes(new HashMap<>(), PackBiomes.names()));
+			PackLoader.Loaded loaded = PackLoader.load(files, dimension, macros, PackMacros.addBiomes(new HashMap<>(), PackBiomes.names()));
 			List<String> warnings = new ArrayList<>(loaded.warnings);
 			renderer = new PackRenderer(selected, loaded, files, warnings);
 			blockIds = BlockIdTable.of(loaded.blockIds);

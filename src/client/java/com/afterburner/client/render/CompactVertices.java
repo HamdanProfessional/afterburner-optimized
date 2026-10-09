@@ -27,6 +27,8 @@ import java.nio.ByteBuffer;
  * <p>
  * While a shader pack is on, sections are built in {@link #EXTENDED_FORMAT} instead: the same first 16 bytes, then what packs
  * read about terrain (see {@link TerrainExtras}), in the 28 bytes a vanilla vertex takes.
+ * <p>
+ * The position encoding and the section slot follow Sodium's compact chunk vertex format (Sodium 0.5, CaffeineMC).
  */
 public final class CompactVertices {
 	public static final boolean ENABLED = Features.COMPACT_VERTICES.enabled() && Features.CHUNK_BATCHING.enabled();
@@ -200,7 +202,8 @@ public final class CompactVertices {
 				ny /= length;
 				nz /= length;
 			}
-			// The tangent points the way u grows; the handedness says which way v does, as packs (and Iris) take it.
+			// The tangent points the way u grows; the handedness says which way v does, as shader packs expect it.
+			// Tangent from the texture coordinates: E. Lengyel, "Computing Tangent Space Basis Vectors for an Arbitrary Mesh" (2001).
 			float e1x = p[3] - p[0], e1y = p[4] - p[1], e1z = p[5] - p[2];
 			float e2x = p[6] - p[0], e2y = p[7] - p[1], e2z = p[8] - p[2];
 			float du1 = uv[2] - uv[0], dv1 = uv[3] - uv[1], du2 = uv[4] - uv[0], dv2 = uv[5] - uv[1];
@@ -271,7 +274,12 @@ public final class CompactVertices {
 		return true;
 	}
 
-	/** A unit vector folded onto an octahedron: two signed bytes (x in the low one), as the shader's ab_unoct reads them. */
+	/**
+	 * Octahedral encoding: Cigolle et al., "A Survey of Efficient Representations for Independent Unit Vectors" (JCGT 2014),
+	 * as in K. Narkowicz, "Octahedron normal vector encoding" (2014).
+	 * <p>
+	 * A unit vector folded onto an octahedron: two signed bytes (x in the low one), as the shader's ab_unoct reads them.
+	 */
 	private static int octahedral(float x, float y, float z) {
 		float s = Math.abs(x) + Math.abs(y) + Math.abs(z);
 		float ox = x / s, oy = y / s;

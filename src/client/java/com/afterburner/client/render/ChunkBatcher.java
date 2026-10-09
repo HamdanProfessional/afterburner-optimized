@@ -51,6 +51,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>
  * Order is kept where it matters: regions are drawn in the order of their nearest section (near to far, like vanilla),
  * and translucent sections, which must go far to near, are only merged with the section drawn right before them.
+ * <p>
+ * Batching by region follows Sodium's design (CaffeineMC), built here on vanilla's renderer.
  */
 public final class ChunkBatcher {
 	private static final ChunkSectionLayer[] LAYERS = ChunkSectionLayer.values();

@@ -4,11 +4,11 @@ import com.afterburner.Features;
 import com.afterburner.labs.lod.Lod;
 import com.afterburner.client.render.RestartablePass;
 import com.afterburner.labs.render.Upscaler;
-import com.afterburner.labs.shaderpack.CustomUniforms;
+import com.afterburner.labs.shaderpack.PackUniforms;
 import com.afterburner.labs.shaderpack.PackFiles;
 import com.afterburner.labs.shaderpack.PackLoader;
-import com.afterburner.labs.shaderpack.ProgramSet;
-import com.afterburner.labs.shaderpack.StandardMacros;
+import com.afterburner.labs.shaderpack.PackPrograms;
+import com.afterburner.labs.shaderpack.PackMacros;
 import com.afterburner.labs.shaderpack.UniformLayout;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -76,7 +76,7 @@ public final class PackRenderer implements AutoCloseable {
 	private final GpuBuffer frameBuffer;
 	private final GpuBuffer drawBuffer;
 	private final ByteBuffer frameData;
-	private final CustomUniforms.Inputs inputs;
+	private final PackUniforms.Inputs inputs;
 	private final Map<String, List<Step>> passes = new LinkedHashMap<>();
 	/** The pack's images and storage buffers, and its compute programs: null without any, or where they can't run. */
 	private final @Nullable PackStorage storage;
@@ -146,9 +146,9 @@ public final class PackRenderer implements AutoCloseable {
 		boolean staged = false;
 		for (UniformLayout.Member m : layout.members()) staged |= m.perDraw() && m.name().equals("renderStage");
 		if (staged) {
-			this.stageBuffers = new GpuBuffer[StandardMacros.RENDER_STAGES.length];
+			this.stageBuffers = new GpuBuffer[PackMacros.RENDER_STAGES.length];
 			for (int i = 0; i < this.stageBuffers.length; i++) {
-				String stage = StandardMacros.RENDER_STAGES[i];
+				String stage = PackMacros.RENDER_STAGES[i];
 				double[] value = {i};
 				this.stageBuffers[i] = device.createBuffer(() -> "Afterburner shader pack draw, " + stage, GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST,
 					layout.drawSize());
@@ -159,7 +159,7 @@ public final class PackRenderer implements AutoCloseable {
 		}
 		for (PackPass.Kind kind : PackPass.Kind.values()) this.stages.put(kind, new Reference2IntOpenHashMap<>());
 
-		for (String group : ProgramSet.PASS_GROUPS) {
+		for (String group : PackPrograms.PASS_GROUPS) {
 			List<Step> steps = new ArrayList<>();
 			for (int i = 0; i < 100; i++) {
 				String passName = i == 0 ? group : group + i;
@@ -174,7 +174,7 @@ public final class PackRenderer implements AutoCloseable {
 		this.finalPass = finalProgram == null ? null : this.pipelines.fullscreen(finalProgram, main.getColorTexture().getFormat());
 	}
 
-	private void upload(GpuBuffer buffer, boolean perDraw, CustomUniforms.Inputs values) {
+	private void upload(GpuBuffer buffer, boolean perDraw, PackUniforms.Inputs values) {
 		int size = perDraw ? this.pack.layout.drawSize() : this.pack.layout.frameSize();
 		this.frameData.clear();
 		this.pack.layout.write(this.frameData, perDraw, values);

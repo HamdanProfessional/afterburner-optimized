@@ -14,6 +14,8 @@ import java.util.Map;
  * relative to each section's corner and tells the GPU where every section is with a draw call of its own. With the
  * positions stored relative to the region's corner instead, all sections of a region share one position, so they can
  * be drawn with one call.
+ * <p>
+ * The region size and drawing a region with one multi-draw follow Sodium's render regions (CaffeineMC).
  */
 public final class ChunkRegions {
 	private static final int MASK_XZ = -128, MASK_Y = -64;

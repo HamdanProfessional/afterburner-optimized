@@ -12,7 +12,7 @@ import org.jspecify.annotations.Nullable;
  * sunPathRotation, ...). Like OptiFine, settings count in code and in comments, but only in active (not #if'd out) lines; the last
  * one wins.
  */
-public final class ProgramDirectives {
+public final class ProgramSettings {
 	private static final Pattern DRAW_BUFFERS = Pattern.compile("DRAWBUFFERS\\s*:\\s*([0-9A-Fa-f]+)");
 	private static final Pattern RENDER_TARGETS = Pattern.compile("RENDERTARGETS\\s*:\\s*([0-9]+(?:\\s*,\\s*[0-9]+)*)");
 	private static final Pattern CONST = Pattern.compile("\\bconst\\s+(int|float|bool|vec4|ivec3|vec3|vec2)\\s+(\\w+)\\s*=\\s*([^;]+);");
@@ -22,13 +22,13 @@ public final class ProgramDirectives {
 	/** Setting name to its value as written ("RGBA16F", "2048", "true", "vec4(0.0, 0.0, 0.0, 1.0)"). */
 	public final Map<String, String> consts;
 
-	private ProgramDirectives(int @Nullable [] drawBuffers, Map<String, String> consts) {
+	private ProgramSettings(int @Nullable [] drawBuffers, Map<String, String> consts) {
 		this.drawBuffers = drawBuffers;
 		this.consts = consts;
 	}
 
 	/** Reads a preprocessed stage. */
-	public static ProgramDirectives of(GlslPreprocessor.Result source) {
+	public static ProgramSettings of(GlslPreprocessor.Result source) {
 		int[] drawBuffers = null;
 		Map<String, String> consts = new LinkedHashMap<>();
 		// Code and comments in line order, so "last one wins" is by position in the file.
@@ -48,7 +48,7 @@ public final class ProgramDirectives {
 			if (found != null) drawBuffers = found;
 			readConsts(text, consts);
 		}
-		return new ProgramDirectives(drawBuffers, consts);
+		return new ProgramSettings(drawBuffers, consts);
 	}
 
 	private static int @Nullable [] drawBuffers(String text) {

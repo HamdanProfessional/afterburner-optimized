@@ -91,7 +91,7 @@ public final class PackOptions {
 		this.definitions = definitions;
 	}
 
-	/** Finds the options of a pack. {@code macros} are the standard ones (see {@link StandardMacros}), for shaders.properties. */
+	/** Finds the options of a pack. {@code macros} are the standard ones (see {@link PackMacros}), for shaders.properties. */
 	public static PackOptions read(PackFiles pack, Map<String, String> macros) throws IOException {
 		List<String> files = pack.list();
 		Map<String, String[]> lines = new LinkedHashMap<>();
@@ -143,9 +143,9 @@ public final class PackOptions {
 		if (pack.exists("/shaders.properties")) {
 			try {
 				GlslPreprocessor pp = new GlslPreprocessor(pack::readRaw, GlslPreprocessor.Mode.PROPERTIES);
-				StandardMacros.apply(pp, macros);
-				ShaderProperties properties = ShaderProperties.parse(pp.process("/shaders.properties"));
-				for (ShaderProperties.Entry e : properties.withPrefix("screen")) {
+				PackMacros.apply(pp, macros);
+				PackProperties properties = PackProperties.parse(pp.process("/shaders.properties"));
+				for (PackProperties.Entry e : properties.withPrefix("screen")) {
 					String key = e.key();
 					if (key.equals("screen")) screens.put("", words(e.value()));
 					else if (key.startsWith("screen.") && key.indexOf('.', "screen.".length()) < 0 && !key.equals("screen.columns")) {
@@ -154,7 +154,7 @@ public final class PackOptions {
 				}
 				String slider = properties.get("sliders");
 				if (slider != null) sliders.addAll(words(slider));
-				for (ShaderProperties.Entry e : properties.withPrefix("profile.")) {
+				for (PackProperties.Entry e : properties.withPrefix("profile.")) {
 					profiles.put(e.key().substring("profile.".length()), words(e.value()));
 				}
 			} catch (GlslPreprocessor.PreprocessException e) {

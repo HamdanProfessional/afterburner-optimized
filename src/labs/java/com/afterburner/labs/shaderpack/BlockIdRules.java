@@ -29,10 +29,10 @@ public final class BlockIdRules {
 
 	public static final BlockIdRules NONE = new BlockIdRules(List.of(), List.of());
 
-	public static BlockIdRules parse(ShaderProperties properties) {
+	public static BlockIdRules parse(PackProperties properties) {
 		List<Rule> rules = new ArrayList<>();
 		List<String> warnings = new ArrayList<>();
-		for (ShaderProperties.Entry e : properties.withPrefix("block.")) {
+		for (PackProperties.Entry e : properties.withPrefix("block.")) {
 			int id;
 			try {
 				id = Integer.parseInt(e.key().substring("block.".length()).strip());

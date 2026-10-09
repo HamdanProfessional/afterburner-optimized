@@ -70,11 +70,11 @@ public final class TranslateTarget {
 	/** Buffer index of each color attachment of the pass, in order; null means the program's own draw buffers. */
 	public final int @Nullable [] attachments;
 	/** The alpha test old programs rely on (OpenGL's fixed one, which OptiFine and Iris keep), or null for none. */
-	public final @Nullable AlphaTest alphaTest;
+	public final @Nullable AlphaCutoff alphaTest;
 
 	private TranslateTarget(Kind kind, Map<String, String> inputs, Set<String> blocks, Map<String, String> attributes, String modelViewMatrix,
 			String projectionMatrix, String textureMatrix, Map<String, String> values, String epilogue, int @Nullable [] attachments,
-			@Nullable AlphaTest alphaTest) {
+			@Nullable AlphaCutoff alphaTest) {
 		this.kind = kind;
 		this.inputs = inputs;
 		this.blocks = blocks;
@@ -89,7 +89,7 @@ public final class TranslateTarget {
 	}
 
 	/** The same with an alpha test, whose reference alphaTestRef then is (as with Iris). */
-	public TranslateTarget withAlphaTest(AlphaTest test) {
+	public TranslateTarget withAlphaTest(AlphaCutoff test) {
 		Map<String, String> values = new LinkedHashMap<>(this.values);
 		values.put("alphaTestRef", test.glslReference());
 		return new TranslateTarget(this.kind, this.inputs, this.blocks, this.attributes, this.modelViewMatrix, this.projectionMatrix,

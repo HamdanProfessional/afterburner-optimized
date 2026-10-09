@@ -31,8 +31,18 @@ with JDK 25. The mod is `build/libs/afterburner-<version>.jar`.
 
 ## Notes
 
-I wrote the mod's code. Claude went through Minecraft's code with me to list what could be made faster, and wrote
-the shaders and the code comments.
+Made with a lot of help from AI (Claude). Claude went through Minecraft's code with me to list what could be made
+faster, and wrote the shaders and the code comments. The rendering part (chunk batching, compact vertices, face
+culling) was also done with AI.
+
+## Credits
+
+- [Sodium](https://github.com/CaffeineMC/sodium): the rendering optimizations (region batching, the compact vertex
+  format, face culling, animating only visible textures) follow Sodium's design, rebuilt on Minecraft's own renderer. No
+  Sodium code is used, and Afterburner turns these off when Sodium is installed.
+- [Iris](https://github.com/IrisShaders/Iris): the unreleased shader pack loader in `src/labs` aims to behave like Iris
+  so packs work the same.
+- Octahedral normals: Cigolle et al. (2014) and K. Narkowicz (2014). Tangents: E. Lengyel (2001).
 
 ## License
 

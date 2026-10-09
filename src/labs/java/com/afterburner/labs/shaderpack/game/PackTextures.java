@@ -2,7 +2,7 @@ package com.afterburner.labs.shaderpack.game;
 
 import com.afterburner.labs.shaderpack.GlslTranslator;
 import com.afterburner.labs.shaderpack.PackFiles;
-import com.afterburner.labs.shaderpack.ShaderProperties;
+import com.afterburner.labs.shaderpack.PackProperties;
 import com.afterburner.labs.shaderpack.TranslateTarget;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -44,7 +44,7 @@ final class PackTextures implements AutoCloseable {
 	/** The normal map packs read (normals): flat, no occlusion, no height. The specular one is {@link #black}: no shine, no glow. */
 	final Bound flatNormals;
 
-	PackTextures(PackFiles files, ShaderProperties properties, List<String> warnings) {
+	PackTextures(PackFiles files, PackProperties properties, List<String> warnings) {
 		GpuDevice device = RenderSystem.getDevice();
 		CommandEncoder encoder = device.createCommandEncoder();
 		this.white = this.solid(encoder, "white", new Vector4f(1, 1, 1, 1));
@@ -56,7 +56,7 @@ final class PackTextures implements AutoCloseable {
 		this.noShadow = new Bound(this.keep(shadow), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
 
 		Bound noise = null;
-		for (ShaderProperties.Entry e : properties.withPrefix("texture.")) {
+		for (PackProperties.Entry e : properties.withPrefix("texture.")) {
 			String[] parts = e.key().split("\\.", 3);
 			if (parts.length == 2 && parts[1].equals("noise")) {
 				noise = this.load(files, e.value(), warnings);

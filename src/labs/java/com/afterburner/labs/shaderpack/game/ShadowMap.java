@@ -1,7 +1,7 @@
 package com.afterburner.labs.shaderpack.game;
 
 import com.afterburner.client.render.ChunkBatcher;
-import com.afterburner.labs.shaderpack.CustomUniforms;
+import com.afterburner.labs.shaderpack.PackUniforms;
 import com.afterburner.labs.shaderpack.PackLoader;
 import com.afterburner.labs.shaderpack.TranslateTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -162,7 +162,7 @@ final class ShadowMap implements AutoCloseable {
 		for (String image : pack.images.images.keySet()) if (used.contains(image)) this.written.add(image);
 		// The pack's own uniforms (and variables) are clocks or followed when what they're made from is.
 		Set<String> clocks = new HashSet<>(CLOCKS), followed = new HashSet<>(FOLLOWED);
-		for (CustomUniforms.Definition d : pack.customUniforms.definitions()) {
+		for (PackUniforms.Definition d : pack.customUniforms.definitions()) {
 			Set<String> refs = Set.copyOf(List.of(d.source().split("\\W+")));
 			if (refs.stream().anyMatch(clocks::contains)) clocks.add(d.name());
 			else if (refs.stream().anyMatch(followed::contains)) followed.add(d.name());
@@ -251,7 +251,7 @@ final class ShadowMap implements AutoCloseable {
 	 * packs fill around the camera's block) and the same values of what else the programs read. Picks and prepares this frame's
 	 * draws either way. Asked before the pack's images are cleared.
 	 */
-	boolean holds(Minecraft mc, FrameUniforms frame, CustomUniforms.Inputs inputs) {
+	boolean holds(Minecraft mc, FrameUniforms frame, PackUniforms.Inputs inputs) {
 		this.prepared = false;
 		ViewArea area = mc.levelRenderer.viewArea();
 		SectionRenderDispatcher dispatcher = mc.levelRenderer.sectionRenderDispatcher();
@@ -326,7 +326,7 @@ final class ShadowMap implements AutoCloseable {
 	}
 
 	/** What a kept map is checked against ({@link #holds}). */
-	private void remember(Vec3 camera, FrameUniforms frame, CustomUniforms.Inputs inputs) {
+	private void remember(Vec3 camera, FrameUniforms frame, PackUniforms.Inputs inputs) {
 		this.valid = true;
 		this.drawnMode = Shaderpacks.shadowUpdates();
 		this.drawnContents = this.contents;
@@ -349,7 +349,7 @@ final class ShadowMap implements AutoCloseable {
 	 * Draws this frame's shadow map, before anything else is drawn: the terrain inside the shadow's box. {@code bind} binds the
 	 * pack's uniforms and textures in the pass.
 	 */
-	void render(Minecraft mc, FrameUniforms frame, CustomUniforms.Inputs inputs, Consumer<RenderPass> bind) {
+	void render(Minecraft mc, FrameUniforms frame, PackUniforms.Inputs inputs, Consumer<RenderPass> bind) {
 		ViewArea area = mc.levelRenderer.viewArea();
 		SectionRenderDispatcher dispatcher = mc.levelRenderer.sectionRenderDispatcher();
 		if (!frame.hasShadow || area == null || dispatcher == null) {

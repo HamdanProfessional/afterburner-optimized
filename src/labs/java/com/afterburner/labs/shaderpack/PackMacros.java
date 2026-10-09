@@ -10,7 +10,7 @@ import java.util.Map;
  * features (OpenGL 4.3), {@link #addIris} adds Iris's macros too, so packs turn on what needs them (colored lighting, ...);
  * otherwise packs see an OptiFine-style loader and IS_IRIS stays undefined.
  */
-public final class StandardMacros {
+public final class PackMacros {
 	/** Same format as Iris for the new version scheme: "26.3" gives 260300. */
 	public static final int MC_VERSION = 260300;
 	/** What our translated shaders target, whatever the driver could do. */
@@ -30,7 +30,7 @@ public final class StandardMacros {
 		"GL_ARB_shader_texture_lod", "GL_EXT_gpu_shader4", "GL_ARB_explicit_attrib_location", "GL_ARB_separate_shader_objects"
 	};
 
-	private StandardMacros() {
+	private PackMacros() {
 	}
 
 	/**

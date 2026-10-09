@@ -18,7 +18,7 @@ import org.jspecify.annotations.Nullable;
  * <p>
  * Values are double arrays: one element for float/int/bool (bool as 0 or 1), 2 to 4 for vectors, 16 (column-major) for matrices.
  */
-public final class CustomUniforms {
+public final class PackUniforms {
 	/** The values expressions can read: game uniforms and parameters, or null if unknown. */
 	public interface Inputs {
 		double @Nullable [] get(String name);
@@ -36,13 +36,13 @@ public final class CustomUniforms {
 	private double deltaSeconds;
 	private int nextSmoothId = 100000;
 
-	private CustomUniforms() {
+	private PackUniforms() {
 	}
 
 	/** Reads and compiles the entries; ones that don't compile are skipped with a warning. */
-	public static CustomUniforms parse(ShaderProperties properties, Map<String, String> constants) {
-		CustomUniforms out = new CustomUniforms();
-		for (ShaderProperties.Entry e : properties.entries()) {
+	public static PackUniforms parse(PackProperties properties, Map<String, String> constants) {
+		PackUniforms out = new PackUniforms();
+		for (PackProperties.Entry e : properties.entries()) {
 			boolean uniform = e.key().startsWith("uniform.");
 			if (!uniform && !e.key().startsWith("variable.")) continue;
 			String[] parts = e.key().split("\\.", 3);
@@ -168,10 +168,10 @@ public final class CustomUniforms {
 	private static final class Parser {
 		private final List<Token> tokens = new ArrayList<>();
 		private final Map<String, String> constants;
-		private final CustomUniforms owner;
+		private final PackUniforms owner;
 		private int pos;
 
-		Parser(String text, Map<String, String> constants, CustomUniforms owner) {
+		Parser(String text, Map<String, String> constants, PackUniforms owner) {
 			for (Token t : GlslPreprocessor.tokenize(text)) if (t.kind() != Kind.SPACE) this.tokens.add(t);
 			this.constants = constants;
 			this.owner = owner;
@@ -548,7 +548,7 @@ public final class CustomUniforms {
 					Expr value = rest.get(0);
 					Expr fadeIn = rest.size() > 1 ? rest.get(1) : null;
 					Expr fadeOut = rest.size() > 2 ? rest.get(2) : fadeIn;
-					CustomUniforms owner = this.owner;
+					PackUniforms owner = this.owner;
 					return in -> {
 						double up = fadeIn != null ? fadeIn.eval(in)[0] : 1.0;
 						double down = fadeOut != null ? fadeOut.eval(in)[0] : up;

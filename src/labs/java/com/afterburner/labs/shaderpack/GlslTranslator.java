@@ -298,7 +298,10 @@ public final class GlslTranslator {
 		"gl_FogCoord", "vec4(0.0)",
 		"dhMaterialId", "0");
 
-	/** Unfolds a unit vector folded onto an octahedron (as CompactVertices writes normals and tangents). */
+	/**
+	 * Unfolds a unit vector folded onto an octahedron (as CompactVertices writes normals and tangents). The decode is
+	 * R. Stubbe's, from K. Narkowicz, "Octahedron normal vector encoding" (2014).
+	 */
 	private static final String UNOCT = """
 		vec3 ab_unoct(vec2 e) {
 			vec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));

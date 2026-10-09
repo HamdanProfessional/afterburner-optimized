@@ -1,7 +1,7 @@
 package com.afterburner.labs.shaderpack.game;
 
-import com.afterburner.labs.shaderpack.AlphaTest;
-import com.afterburner.labs.shaderpack.StandardMacros;
+import com.afterburner.labs.shaderpack.AlphaCutoff;
+import com.afterburner.labs.shaderpack.PackMacros;
 import java.util.Arrays;
 import org.jspecify.annotations.Nullable;
 
@@ -85,7 +85,7 @@ final class ProgramMapping {
 	}
 
 	/**
-	 * The render stage of what a pipeline draws (the renderStage uniform, a number from {@link StandardMacros#RENDER_STAGES}).
+	 * The render stage of what a pipeline draws (the renderStage uniform, a number from {@link PackMacros#RENDER_STAGES}).
 	 * In the shadow pass it's the terrain's, so packs that fill voxels from terrain there find it.
 	 */
 	static int stage(String path, PackPass.Kind pass, boolean translucent) {
@@ -117,9 +117,9 @@ final class ProgramMapping {
 		});
 	}
 
-	/** A render stage's number, by its name in {@link StandardMacros#RENDER_STAGES}. */
+	/** A render stage's number, by its name in {@link PackMacros#RENDER_STAGES}. */
 	static int stage(String stage) {
-		return Math.max(0, Arrays.asList(StandardMacros.RENDER_STAGES).indexOf(stage));
+		return Math.max(0, Arrays.asList(PackMacros.RENDER_STAGES).indexOf(stage));
 	}
 
 	/** A pipeline's name without what Afterburner and the game add to it ("pipeline/compact_solid_terrain_extended"). */
@@ -129,19 +129,19 @@ final class ProgramMapping {
 	 * and as Iris, a tenth for what the game's shaders cut out themselves (particles, rain, clouds, cracks, glowing eyes) and
 	 * nearly nothing for text.
 	 */
-	static AlphaTest alphaTest(String path, PackPass.Kind pass, @Nullable String cutout) {
+	static AlphaCutoff alphaTest(String path, PackPass.Kind pass, @Nullable String cutout) {
 		String name = name(path);
 		if (cutout != null) {
-			if (!pass.shadow() && name.equals("translucent_terrain")) return AlphaTest.NON_ZERO;
+			if (!pass.shadow() && name.equals("translucent_terrain")) return AlphaCutoff.NON_ZERO;
 			try {
-				return new AlphaTest("GREATER", Float.parseFloat(cutout));
+				return new AlphaCutoff("GREATER", Float.parseFloat(cutout));
 			} catch (NumberFormatException e) {
-				return AlphaTest.ONE_TENTH;
+				return AlphaCutoff.ONE_TENTH;
 			}
 		}
 		return switch (name) {
-			case "opaque_particle", "translucent_particle", "weather", "clouds", "flat_clouds", "crumbling", "eyes" -> AlphaTest.ONE_TENTH;
-			default -> name.startsWith("text") ? AlphaTest.NON_ZERO : AlphaTest.OFF;
+			case "opaque_particle", "translucent_particle", "weather", "clouds", "flat_clouds", "crumbling", "eyes" -> AlphaCutoff.ONE_TENTH;
+			default -> name.startsWith("text") ? AlphaCutoff.NON_ZERO : AlphaCutoff.OFF;
 		};
 	}
 

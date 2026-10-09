@@ -37,9 +37,9 @@ public final class PackBlending {
 	private PackBlending() {
 	}
 
-	static PackBlending parse(ShaderProperties properties, List<String> warnings) {
+	static PackBlending parse(PackProperties properties, List<String> warnings) {
 		PackBlending out = new PackBlending();
-		for (ShaderProperties.Entry e : properties.withPrefix("blend.")) {
+		for (PackProperties.Entry e : properties.withPrefix("blend.")) {
 			String rest = e.key().substring("blend.".length());
 			int dot = rest.indexOf('.');
 			String program = dot < 0 ? rest : rest.substring(0, dot);

@@ -12,13 +12,13 @@ import org.jspecify.annotations.Nullable;
  * whose first output's alpha fails {@code function} (OpenGL's: NEVER, LESS, EQUAL, LEQUAL, GREATER, NOTEQUAL, GEQUAL, ALWAYS)
  * against {@code reference} is discarded, and the pack's alphaTestRef is the reference.
  */
-public record AlphaTest(String function, float reference) {
+public record AlphaCutoff(String function, float reference) {
 	/** None: every fragment kept, alphaTestRef 0.0 (Iris's for what isn't cut out). */
-	public static final AlphaTest OFF = new AlphaTest("ALWAYS", 0.0F);
+	public static final AlphaCutoff OFF = new AlphaCutoff("ALWAYS", 0.0F);
 	/** OptiFine's: over a tenth. */
-	public static final AlphaTest ONE_TENTH = new AlphaTest("GREATER", 0.1F);
+	public static final AlphaCutoff ONE_TENTH = new AlphaCutoff("GREATER", 0.1F);
 	/** Iris's for water and other see-through terrain: anything not quite invisible. */
-	public static final AlphaTest NON_ZERO = new AlphaTest("GREATER", 0.0001F);
+	public static final AlphaCutoff NON_ZERO = new AlphaCutoff("GREATER", 0.0001F);
 	private static final Map<String, String> OPERATORS = Map.of("LESS", "<", "EQUAL", "==", "LEQUAL", "<=", "GREATER", ">", "NOTEQUAL", "!=",
 		"GEQUAL", ">=");
 
@@ -35,7 +35,7 @@ public record AlphaTest(String function, float reference) {
 	}
 
 	/** A test as a directive gives it ("GREATER 0.1", "GL_GEQUAL 0.5", "off"); null if it isn't one. */
-	public static @Nullable AlphaTest parse(String value) {
+	public static @Nullable AlphaCutoff parse(String value) {
 		String[] parts = value.strip().split("\\s+");
 		if (parts.length == 1 && (parts[0].equalsIgnoreCase("off") || parts[0].equalsIgnoreCase("false"))) return OFF;
 		if (parts.length != 2) return null;
@@ -44,18 +44,18 @@ public record AlphaTest(String function, float reference) {
 		if (!function.equals("NEVER") && !function.equals("ALWAYS") && !OPERATORS.containsKey(function)) return null;
 		try {
 			float reference = Float.parseFloat(parts[1]);
-			return Float.isFinite(reference) ? new AlphaTest(function, reference) : null;
+			return Float.isFinite(reference) ? new AlphaCutoff(function, reference) : null;
 		} catch (NumberFormatException e) {
 			return null;
 		}
 	}
 
 	/** A pack's alphaTest.&lt;program&gt; directives (shaders.properties): program to its test. */
-	static Map<String, AlphaTest> directives(ShaderProperties properties, List<String> warnings) {
-		Map<String, AlphaTest> out = new HashMap<>();
-		for (ShaderProperties.Entry e : properties.withPrefix("alphaTest.")) {
+	static Map<String, AlphaCutoff> directives(PackProperties properties, List<String> warnings) {
+		Map<String, AlphaCutoff> out = new HashMap<>();
+		for (PackProperties.Entry e : properties.withPrefix("alphaTest.")) {
 			String program = e.key().substring("alphaTest.".length());
-			AlphaTest test = parse(e.value());
+			AlphaCutoff test = parse(e.value());
 			if (program.isEmpty() || test == null) {
 				warnings.add(e.origin() + ": can't read " + e.key() + "=" + e.value());
 				continue;

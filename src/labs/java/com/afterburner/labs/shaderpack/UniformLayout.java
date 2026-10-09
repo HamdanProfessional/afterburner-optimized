@@ -115,10 +115,10 @@ public final class UniformLayout {
 	}
 
 	/**
-	 * Writes one block's values at the buffer's position (which isn't moved). Values are as in {@link CustomUniforms}: matrices
+	 * Writes one block's values at the buffer's position (which isn't moved). Values are as in {@link PackUniforms}: matrices
 	 * column-major, arrays one element after another; members without a value are zero.
 	 */
-	public void write(ByteBuffer buffer, boolean perDraw, CustomUniforms.Inputs values) {
+	public void write(ByteBuffer buffer, boolean perDraw, PackUniforms.Inputs values) {
 		int base = buffer.position();
 		int size = perDraw ? this.drawSize : this.frameSize;
 		for (int i = 0; i < size; i += 4) buffer.putInt(base + i, 0);

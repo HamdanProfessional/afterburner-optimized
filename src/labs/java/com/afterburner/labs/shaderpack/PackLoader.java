@@ -27,8 +27,8 @@ public final class PackLoader {
 	private static final Set<String> BEFORE_DEFERRED = Set.of("gbuffers_terrain_solid", "gbuffers_terrain_cutout", "dh_terrain");
 	private static final Set<String> AFTER_DEFERRED = Set.of("gbuffers_water", "dh_water");
 
-	public record Program(String name, TranslateTarget.Kind kind, ProgramSet.Source source, GlslPreprocessor.Result vsh,
-			GlslPreprocessor.Result fsh, GlslTranslator.Parsed vs, GlslTranslator.Parsed fs, ProgramDirectives directives) {
+	public record Program(String name, TranslateTarget.Kind kind, PackPrograms.Source source, GlslPreprocessor.Result vsh,
+			GlslPreprocessor.Result fsh, GlslTranslator.Parsed vs, GlslTranslator.Parsed fs, ProgramSettings directives) {
 		/** The buffers the program draws to: its directive, or one per output. */
 		public int[] drawBuffers() {
 			if (this.directives.drawBuffers != null) return this.directives.drawBuffers;
@@ -40,15 +40,15 @@ public final class PackLoader {
 
 	/** A compute program (a .csh file) of pass {@code pass} ("shadowcomp", "composite1", ...). */
 	public record ComputeProgram(String pass, String path, GlslPreprocessor.Result source, GlslTranslator.Parsed cs,
-			ProgramDirectives directives) {}
+			ProgramSettings directives) {}
 
 	public static final class Loaded {
 		public final String folder;
-		public final ProgramSet programSet;
+		public final PackPrograms programSet;
 		public final Map<String, Program> programs;
 		public final UniformLayout layout;
-		public final ShaderProperties properties;
-		public final CustomUniforms customUniforms;
+		public final PackProperties properties;
+		public final PackUniforms customUniforms;
 		/** The const settings of all programs (colortex0Format, shadowMapResolution, ...), later programs winning. */
 		public final Map<String, String> consts;
 		/** The buffers the gbuffers programs draw to, together: the color attachments of the world passes. */
@@ -61,7 +61,7 @@ public final class PackLoader {
 		public final int[] skyBuffers, opaqueBuffers, translucentBuffers, handBuffers;
 		/** block.properties: the block IDs terrain gets in mc_Entity. */
 		public final BlockIdRules blockIds;
-		/** Pass name to its compute programs, in the order they run ({@link ProgramSet#COMPUTE_GROUPS}). */
+		/** Pass name to its compute programs, in the order they run ({@link PackPrograms#COMPUTE_GROUPS}). */
 		public final Map<String, List<ComputeProgram>> computes;
 		/** Custom images and storage buffers. */
 		public final PackImages images;
@@ -70,11 +70,11 @@ public final class PackLoader {
 		/** The blend.* directives. */
 		public final PackBlending blending;
 		/** The alphaTest.* directives: program to its test. */
-		public final Map<String, AlphaTest> alphaTests;
+		public final Map<String, AlphaCutoff> alphaTests;
 		public final List<String> warnings;
 
-		Loaded(String folder, ProgramSet programSet, Map<String, Program> programs, UniformLayout layout, ShaderProperties properties,
-				CustomUniforms customUniforms, Map<String, String> consts, int[] worldBuffers, BlockIdRules blockIds,
+		Loaded(String folder, PackPrograms programSet, Map<String, Program> programs, UniformLayout layout, PackProperties properties,
+				PackUniforms customUniforms, Map<String, String> consts, int[] worldBuffers, BlockIdRules blockIds,
 				Map<String, List<ComputeProgram>> computes, PackImages images, Map<String, Integer> bufferBlocks, List<String> warnings) {
 			this.folder = folder;
 			this.programSet = programSet;
@@ -90,7 +90,7 @@ public final class PackLoader {
 			this.bufferBlocks = bufferBlocks;
 			this.warnings = warnings;
 			this.blending = PackBlending.parse(properties, warnings);
-			this.alphaTests = AlphaTest.directives(properties, warnings);
+			this.alphaTests = AlphaCutoff.directives(properties, warnings);
 			this.skyBuffers = this.passBuffers(SKY_PROGRAMS, Set.of());
 			this.opaqueBuffers = this.passBuffers(MAIN_PROGRAMS, AFTER_DEFERRED);
 			this.translucentBuffers = this.passBuffers(MAIN_PROGRAMS, BEFORE_DEFERRED);
@@ -135,7 +135,7 @@ public final class PackLoader {
 
 		/** The program for a slot after fallbacks (gbuffers_water may be gbuffers_terrain), or null. */
 		public @Nullable Program get(String name) {
-			ProgramSet.Source source = this.programSet.get(name);
+			PackPrograms.Source source = this.programSet.get(name);
 			return source == null ? null : this.programs.get(source.name());
 		}
 
@@ -152,20 +152,20 @@ public final class PackLoader {
 	}
 
 	/**
-	 * {@code dimensionId} is like "minecraft:overworld"; {@code macros} are {@link StandardMacros}; {@code constants} are the
+	 * {@code dimensionId} is like "minecraft:overworld"; {@code macros} are {@link PackMacros}; {@code constants} are the
 	 * names custom uniforms may use as numbers (BIOME_PLAINS, ...).
 	 */
 	public static Loaded load(PackFiles pack, String dimensionId, Map<String, String> macros, Map<String, String> constants) throws Exception {
 		List<String> warnings = new ArrayList<>();
-		ShaderProperties dimensions = null;
+		PackProperties dimensions = null;
 		if (pack.exists("/dimension.properties")) dimensions = properties(pack, "/dimension.properties", macros, Map.of());
-		String folder = ProgramSet.dimensionFolder(pack, dimensions, dimensionId);
+		String folder = PackPrograms.dimensionFolder(pack, dimensions, dimensionId);
 
 		// Every program first, for the options' macros (shaders.properties is preprocessed with them).
-		ProgramSet everything = ProgramSet.load(pack, folder, key -> true);
+		PackPrograms everything = PackPrograms.load(pack, folder, key -> true);
 		Map<String, GlslPreprocessor.Result[]> sources = new LinkedHashMap<>();
 		Map<String, GlslPreprocessor.Macro> optionMacros = new LinkedHashMap<>();
-		for (ProgramSet.Source source : everything.all().values()) {
+		for (PackPrograms.Source source : everything.all().values()) {
 			try {
 				GlslPreprocessor.Result vsh = preprocess(pack, source.vertex(), macros);
 				GlslPreprocessor.Result fsh = preprocess(pack, source.fragment(), macros);
@@ -181,12 +181,12 @@ public final class PackLoader {
 
 		GlslPreprocessor propertiesPp = new GlslPreprocessor(pack::read, GlslPreprocessor.Mode.PROPERTIES);
 		propertiesPp.defineAll(optionMacros);
-		StandardMacros.apply(propertiesPp, macros);
-		ShaderProperties properties = pack.exists("/shaders.properties")
-			? ShaderProperties.parse(propertiesPp.process("/shaders.properties"))
-			: ShaderProperties.parse(propertiesPp.processText("/shaders.properties", ""));
+		PackMacros.apply(propertiesPp, macros);
+		PackProperties properties = pack.exists("/shaders.properties")
+			? PackProperties.parse(propertiesPp.process("/shaders.properties"))
+			: PackProperties.parse(propertiesPp.processText("/shaders.properties", ""));
 		boolean farTerrain = macros.containsKey("DISTANT_HORIZONS");
-		ProgramSet programSet = ProgramSet.load(pack, folder, key -> {
+		PackPrograms programSet = PackPrograms.load(pack, folder, key -> {
 			// Distant Horizons' programs need its macros: without them the far terrain isn't drawn with them.
 			if (!farTerrain && key.matches("program\\.(.*/)?dh_.*")) return false;
 			String value = properties.get(key);
@@ -202,7 +202,7 @@ public final class PackLoader {
 		Map<String, Program> programs = new LinkedHashMap<>();
 		UniformLayout layout = new UniformLayout();
 		Map<String, String> consts = new LinkedHashMap<>();
-		for (ProgramSet.Source source : programSet.all().values()) {
+		for (PackPrograms.Source source : programSet.all().values()) {
 			GlslPreprocessor.Result[] pp = sources.get(source.name());
 			if (pp == null) continue;
 			try {
@@ -210,8 +210,8 @@ public final class PackLoader {
 				GlslTranslator.Parsed fs = GlslTranslator.parse(pp[1], GlslTranslator.Stage.FRAGMENT);
 				GlslTranslator.collectUniforms(vs, layout);
 				GlslTranslator.collectUniforms(fs, layout);
-				ProgramDirectives directives = ProgramDirectives.of(pp[1]);
-				consts.putAll(ProgramDirectives.of(pp[0]).consts);
+				ProgramSettings directives = ProgramSettings.of(pp[1]);
+				consts.putAll(ProgramSettings.of(pp[0]).consts);
 				consts.putAll(directives.consts);
 				programs.put(source.name(), new Program(source.name(), kind(source.name()), source, pp[0], pp[1], vs, fs, directives));
 			} catch (GlslTranslator.TranslateException e) {
@@ -227,7 +227,7 @@ public final class PackLoader {
 					for (String w : source.warnings) warnings.add(path + ": " + w);
 					GlslTranslator.Parsed cs = GlslTranslator.parse(source, GlslTranslator.Stage.COMPUTE);
 					GlslTranslator.collectUniforms(cs, layout);
-					list.add(new ComputeProgram(e.getKey(), path, source, cs, ProgramDirectives.of(source)));
+					list.add(new ComputeProgram(e.getKey(), path, source, cs, ProgramSettings.of(source)));
 				} catch (GlslPreprocessor.PreprocessException | GlslTranslator.TranslateException ex) {
 					warnings.add(path + ": " + ex.getMessage());
 				}
@@ -260,7 +260,7 @@ public final class PackLoader {
 		}
 		int[] worldBuffers = world.stream().mapToInt(Integer::intValue).toArray();
 
-		CustomUniforms custom = CustomUniforms.parse(properties, constants);
+		PackUniforms custom = PackUniforms.parse(properties, constants);
 		warnings.addAll(custom.warnings());
 		BlockIdRules blockIds = BlockIdRules.NONE;
 		if (pack.exists("/block.properties")) {
@@ -305,15 +305,15 @@ public final class PackLoader {
 	private static GlslPreprocessor.Result preprocess(PackFiles pack, String path, Map<String, String> macros)
 			throws GlslPreprocessor.PreprocessException {
 		GlslPreprocessor pp = new GlslPreprocessor(pack::read, GlslPreprocessor.Mode.GLSL);
-		StandardMacros.apply(pp, macros);
+		PackMacros.apply(pp, macros);
 		return pp.process(path);
 	}
 
-	private static ShaderProperties properties(PackFiles pack, String path, Map<String, String> macros,
+	private static PackProperties properties(PackFiles pack, String path, Map<String, String> macros,
 			Map<String, GlslPreprocessor.Macro> options) throws GlslPreprocessor.PreprocessException {
 		GlslPreprocessor pp = new GlslPreprocessor(pack::read, GlslPreprocessor.Mode.PROPERTIES);
 		pp.defineAll(options);
-		StandardMacros.apply(pp, macros);
-		return ShaderProperties.parse(pp.process(path));
+		PackMacros.apply(pp, macros);
+		return PackProperties.parse(pp.process(path));
 	}
 }
