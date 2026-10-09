@@ -3,7 +3,7 @@
 	"id": "afterburner_labs",
 	"version": "${version}",
 	"name": "Afterburner Labs",
-	"description": "Afterburner's unreleased work in progress: a shader pack loader, upscaling and far terrain. For testing, not for play.",
+	"description": "Afterburner's experimental parts: a shader pack loader, upscaling and far terrain. The shader pack loader and upscaling stay off with Sodium or Iris.",
 	"authors": [
 		"Hamdan"
 	],
@@ -28,7 +28,6 @@
 	],
 	"depends": {
 		"afterburner": "*",
-		"afterburner_bench": "*",
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.3",
 		"java": ">=25",

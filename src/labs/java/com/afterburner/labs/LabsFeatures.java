@@ -14,6 +14,10 @@ public final class LabsFeatures {
 			&& !"false".equalsIgnoreCase(System.getProperty("afterburner.farTerrain"))
 			&& Stream.of("voxy", "distanthorizons", "sodium").noneMatch(FabricLoader.getInstance()::isModLoaded);
 
+	/** The shader pack loader and upscaling: they draw through Afterburner's chunk batcher, so they stay out with Sodium or Iris. */
+	public static final boolean SHADERS = !Boolean.getBoolean("afterburner.disable")
+			&& Stream.of("sodium", "iris", "oculus").noneMatch(FabricLoader.getInstance()::isModLoaded);
+
 	private LabsFeatures() {
 	}
 }

@@ -43,3 +43,4 @@ replay_*.log
 run-*/
 run-extra/
 logs/
+/run-compat/

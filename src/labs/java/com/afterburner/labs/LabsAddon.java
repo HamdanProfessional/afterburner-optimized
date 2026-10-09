@@ -19,7 +19,7 @@ import net.minecraft.network.chat.MutableComponent;
 public final class LabsAddon implements AfterburnerAddon {
 	@Override
 	public boolean shaderPackActive() {
-		return Shaderpacks.active();
+		return LabsFeatures.SHADERS && Shaderpacks.active();
 	}
 
 	@Override
@@ -29,6 +29,18 @@ public final class LabsAddon implements AfterburnerAddon {
 
 	@Override
 	public void addSettings(SettingsScreen.Rows rows) {
+		if (LabsFeatures.SHADERS) addShaderSettings(rows);
+		if (LabsFeatures.FAR_TERRAIN) {
+			rows.header("afterburner.group.farTerrain");
+			rows.add(farTerrainSlider());
+			rows.add(Button.builder(unseenLandLabel(), b -> {
+				LodSettings.setUnseenLand(!LodSettings.unseenLand());
+				b.setMessage(unseenLandLabel());
+			}).tooltip(Tooltip.create(Component.translatable("afterburner.option.unseenLand.tooltip"))).width(310).build());
+		}
+	}
+
+	private static void addShaderSettings(SettingsScreen.Rows rows) {
 		rows.header("afterburner.group.upscale");
 		rows.add(Button.builder(upscaleLabel(), b -> {
 			Shaderpacks.Upscale[] modes = Shaderpacks.Upscale.values();
@@ -43,14 +55,6 @@ public final class LabsAddon implements AfterburnerAddon {
 			Shaderpacks.setShadowUpdates(modes[(Shaderpacks.shadowUpdates().ordinal() + 1) % modes.length]);
 			b.setMessage(shadowUpdatesLabel());
 		}).tooltip(Tooltip.create(Component.translatable("afterburner.option.shadowUpdates.tooltip"))).width(310).build());
-		if (LabsFeatures.FAR_TERRAIN) {
-			rows.header("afterburner.group.farTerrain");
-			rows.add(farTerrainSlider());
-			rows.add(Button.builder(unseenLandLabel(), b -> {
-				LodSettings.setUnseenLand(!LodSettings.unseenLand());
-				b.setMessage(unseenLandLabel());
-			}).tooltip(Tooltip.create(Component.translatable("afterburner.option.unseenLand.tooltip"))).width(310).build());
-		}
 	}
 
 	/** The chosen pack; opens the shader pack page. */

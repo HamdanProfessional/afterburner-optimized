@@ -26,8 +26,9 @@ with JDK 25. The mod is `build/libs/afterburner-<version>.jar`.
   FPS target.
 - `src/bench`: the benchmark and check commands used while developing, as a mod of their own (`afterburner_bench`).
   The dev client loads it; the released jar doesn't contain it.
-- `src/labs`: work in progress that isn't released: a shader pack loader, upscaling and far terrain. It's a mod of its
-  own (`afterburner_labs`) that the dev client loads; the released jar doesn't contain it.
+- `src/labs`: the experimental parts: a shader pack loader, upscaling and far terrain. It's a mod of its own
+  (`afterburner_labs`) that the released jar carries inside. The shader pack loader and upscaling turn off with Sodium,
+  Iris or Oculus; far terrain turns off with Sodium, Voxy or Distant Horizons.
 
 ## Notes
 
@@ -40,8 +41,8 @@ culling) was also done with AI.
 - [Sodium](https://github.com/CaffeineMC/sodium): the rendering optimizations (region batching, the compact vertex
   format, face culling, animating only visible textures) follow Sodium's design, rebuilt on Minecraft's own renderer. No
   Sodium code is used, and Afterburner turns these off when Sodium is installed.
-- [Iris](https://github.com/IrisShaders/Iris): the unreleased shader pack loader in `src/labs` aims to behave like Iris
-  so packs work the same.
+- [Iris](https://github.com/IrisShaders/Iris): the shader pack loader in `src/labs` aims to behave like Iris
+  so packs work the same. No Iris code is used, and it turns off when Iris is installed.
 - Octahedral normals: Cigolle et al. (2014) and K. Narkowicz (2014). Tangents: E. Lengyel (2001).
 
 ## License

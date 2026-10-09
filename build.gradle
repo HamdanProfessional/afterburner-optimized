@@ -44,6 +44,11 @@ loom {
 	}
 
 	runs {
+		compatClient {
+			client()
+			configName = "Compat Client"
+			runDir "run-compat"
+		}
 		client {
 			// The dev client loads the labs and the bench tools too (the labs' classpath has both).
 			source sourceSets.labs
@@ -119,6 +124,14 @@ tasks.named('build') {
 jar {
 	def projectName = project.name
 	inputs.property "projectName", projectName
+
+	// The labs ride along inside the released jar, as a nested mod Fabric loads next to Afterburner.
+	def labsFile = labsJar.flatMap { it.archiveFileName }
+	inputs.property "labsFile", labsFile
+	from(labsJar) { into 'META-INF/jars' }
+	filesMatching('fabric.mod.json') {
+		filter { it.replace('"accessWidener"', '"jars": [{"file": "META-INF/jars/' + labsFile.get() + '"}], "accessWidener"') }
+	}
 
 	from("LICENSE") {
 		rename { "${it}_$projectName"}

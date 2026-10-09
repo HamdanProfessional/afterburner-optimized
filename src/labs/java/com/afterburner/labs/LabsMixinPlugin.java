@@ -7,11 +7,12 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 import java.util.List;
 import java.util.Set;
 
-/** The far terrain's mixins go in only with the far terrain ({@link LabsFeatures#FAR_TERRAIN}); the others always do. */
+/** The far terrain's mixins go in only with the far terrain ({@link LabsFeatures#FAR_TERRAIN}), the others only with {@link LabsFeatures#SHADERS}. */
 public class LabsMixinPlugin implements IMixinConfigPlugin {
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-		return LabsFeatures.FAR_TERRAIN || !mixinClassName.startsWith("com.afterburner.labs.mixin.lod.");
+		if (mixinClassName.startsWith("com.afterburner.labs.mixin.lod.")) return LabsFeatures.FAR_TERRAIN;
+		return LabsFeatures.SHADERS;
 	}
 
 	@Override
