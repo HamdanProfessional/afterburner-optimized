@@ -39,6 +39,8 @@ public enum Features {
 	SMOOTH_LIGHT_CACHE("smoothLightCache", "bigger smooth lighting cache", Group.RENDER, "sodium"),
 	/** The visibility update remembers how far each section corner's line to the camera gets, instead of walking it again for every neighbour. Same sections in view. */
 	FAST_VISIBILITY("fastVisibility", "faster visibility updates", Group.RENDER, "sodium"),
+	/** Particles only in chunk sections hidden behind terrain aren't drawn, and each keeps its light while it stays in the same block and nothing changes. */
+	FAST_PARTICLES("fastParticles", "faster particles", Group.RENDER, "sodium"),
 	/** The chunk renderer reserves GPU memory for meshes in pieces that grow with what's needed instead of 128 MB at a time. */
 	CHUNK_BUFFERS("chunkBuffers", "smaller chunk buffers", Group.MEMORY, "sodium"),
 	/** Built chunk sections let go of the copy of the blocks around them they were built from (vanilla keeps the last one). */
@@ -71,6 +73,14 @@ public enum Features {
 	FAST_BIOME_SEARCH("fastBiomeSearch", "faster biome search", Group.WORLD, "c2me"),
 	/** Chunks with block or fluid ticks due that can't run them (outside simulation distance) are set aside until they can, instead of being asked again every tick. */
 	PARKED_TICKS("parkedTicks", "parked scheduled ticks", Group.WORLD, "lithium", "moonrise", "c2me"),
+	/** Furnaces, smokers, blast furnaces and campfires with nothing to do (no fuel burning, nothing to cook) skip their ticks until an item, a block change or the like gives them work. */
+	IDLE_BLOCK_ENTITIES("idleBlockEntities", "sleeping idle furnaces", Group.WORLD, "lithium"),
+	/** Explosions look each block in their reach up once instead of at every 0.3-block step of each of their 1352 rays. */
+	FAST_EXPLOSIONS("fastExplosions", "faster explosions", Group.WORLD, "lithium"),
+	/** Redstone dust reads each block around it once while working out its power, and a powered wire works out only the sides it's asked about. */
+	FAST_REDSTONE("fastRedstone", "faster redstone dust", Group.WORLD, "lithium", "alternate-current"),
+	/** Blocks that work out a shape for each state share the shapes that are the same as another block's (every kind of wall makes the same ones). */
+	SHARED_SHAPES("sharedShapes", "shared block shapes", Group.WORLD, "ferritecore"),
 	/** Chunk sections check for use from two threads with one field instead of four objects per block and biome container. */
 	LEAN_SECTIONS("leanSections", "leaner chunk sections", Group.WORLD, "ferritecore", "lithium", "moonrise"),
 	/** The game's background workers run just below normal priority, so frames come first when every core is busy (client). */
@@ -120,7 +130,7 @@ public enum Features {
 		for (Features f : values()) {
 			// A JVM flag (benchmarks, testing) wins over the settings file.
 			String flag = System.getProperty("afterburner." + f.key);
-			boolean on = all && f.replacedBy == null && (flag != null ? !"false".equalsIgnoreCase(flag) : Settings.get(f.key));
+			boolean on = all && f.replacedBy == null && (flag != null ? !"false".equalsIgnoreCase(flag) : Settings.get(f));
 			f.enabled = on;
 		}
 		// In the order listed (a needed one comes first), so what it itself needs is settled first.
@@ -137,6 +147,15 @@ public enum Features {
 			case COMPACT_VERTICES, OCCLUSION_CULLING, TRANSLUCENT_CULLING, VISIBLE_ANIMATIONS -> CHUNK_BATCHING;
 			default -> null;
 		};
+	}
+
+	/**
+	 * On unless the settings file says off. On phones and tablets ({@link Mobile}) occlusion culling starts off: its test
+	 * reads the depth of the solid terrain in the middle of the frame, which makes a tiled phone GPU write the whole screen
+	 * out and read it back.
+	 */
+	public boolean defaultOn() {
+		return !Mobile.ACTIVE || this != OCCLUSION_CULLING && this != ENTITY_CULLING;
 	}
 
 	/** Set by a JVM flag, which the settings file can't change. */

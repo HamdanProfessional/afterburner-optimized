@@ -87,7 +87,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 			}
 			Tooltip tooltip = tooltip(f);
 			OptionInstance<Boolean> button = OptionInstance.createBoolean("afterburner.option." + f.key(), value -> tooltip,
-					locked(f) ? f.enabled() : Settings.get(f.key()), value -> changed(f, value));
+					locked(f) ? f.enabled() : Settings.get(f), value -> changed(f, value));
 			buttons.put(f, button);
 			row.add(button);
 		}
@@ -171,7 +171,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 	/** Whether it will be on after the next restart, as the settings stand. */
 	private static boolean atStart(Features f) {
 		if (locked(f)) return f.enabled();
-		return Settings.get(f.key()) && (f.needs() == null || atStart(f.needs()));
+		return Settings.get(f) && (f.needs() == null || atStart(f.needs()));
 	}
 
 	private static boolean restartNeeded() {

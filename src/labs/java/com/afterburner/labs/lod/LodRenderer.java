@@ -1,5 +1,6 @@
 package com.afterburner.labs.lod;
 
+import com.afterburner.Mobile;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.buffers.GpuBuffer;
@@ -72,7 +73,8 @@ final class LodRenderer {
 	private static final int VERTEX_BYTES = 8;
 	/** A node is split into finer ones while the player is nearer than this many of its voxels. */
 	private static final int DETAIL = 256;
-	private static final long UPLOAD_BUDGET = 4L << 20;
+	/** Bytes uploaded per frame; less on phones, where the GL layer copies each upload once more. */
+	private static final long UPLOAD_BUDGET = (Mobile.ACTIVE ? 1L : 4L) << 20;
 	/** A built node whose chunks changed is rebuilt at most this often (nanoseconds, doubling per level up to 16 s). */
 	private static final long REBUILD_AFTER = 2_000_000_000L;
 	/** Added to a rebuild's priority, so places with nothing drawn yet come first. */

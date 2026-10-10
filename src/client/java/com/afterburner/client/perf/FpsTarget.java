@@ -1,5 +1,6 @@
 package com.afterburner.client.perf;
 
+import com.afterburner.Mobile;
 import com.afterburner.client.Addons;
 import com.afterburner.client.render.WideSections;
 import com.mojang.blaze3d.platform.Monitor;
@@ -344,6 +345,8 @@ public final class FpsTarget {
 
 	private static int read() {
 		Properties p = new Properties();
+		// Phones start with a target of 30, so a slow one lowers what's drawn instead of stuttering; it can be turned off.
+		if (Mobile.ACTIVE) p.setProperty("target", "30");
 		if (Files.exists(CONFIG)) {
 			try (Reader in = Files.newBufferedReader(CONFIG, StandardCharsets.UTF_8)) {
 				p.load(in);

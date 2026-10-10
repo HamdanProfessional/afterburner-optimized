@@ -1,6 +1,7 @@
 package com.afterburner.client.memory;
 
 import com.afterburner.Afterburner;
+import com.afterburner.Mobile;
 import com.afterburner.client.render.Probe;
 import com.sun.management.HotSpotDiagnosticMXBean;
 import com.sun.management.VMOption;
@@ -11,7 +12,7 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryUsage;
 
 /**
- * Gives memory the game isn't using back to Windows while nobody is playing.
+ * Gives memory the game isn't using back to the system while nobody is playing.
  * <p>
  * Java grabs more memory whenever the game is busy (loading chunks makes lots of short-lived objects) but hardly ever
  * returns it: only after a full clean-up, and only if more than 70% of what it holds is empty. So the game keeps showing
@@ -25,8 +26,9 @@ import java.lang.management.MemoryUsage;
  * options themselves.
  */
 public final class MemoryTrim {
-	private static final long IDLE_NANOS = 10_000_000_000L;
-	private static final long MIN_HELD = 512L << 20;
+	/** On a phone, sooner and from less: Android closes background apps that hold much memory. */
+	private static final long IDLE_NANOS = Mobile.ACTIVE ? 3_000_000_000L : 10_000_000_000L;
+	private static final long MIN_HELD = (Mobile.ACTIVE ? 256L : 512L) << 20;
 
 	private static HotSpotDiagnosticMXBean vm;
 	private static long idleSince = -1;

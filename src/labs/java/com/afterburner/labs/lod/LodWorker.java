@@ -1,5 +1,6 @@
 package com.afterburner.labs.lod;
 
+import com.afterburner.Mobile;
 import com.afterburner.labs.worldgen.FarLand;
 import net.minecraft.core.Holder;
 import net.minecraft.resources.Identifier;
@@ -28,7 +29,7 @@ import java.util.concurrent.locks.LockSupport;
 final class LodWorker {
 	private static final Logger LOGGER = LoggerFactory.getLogger("afterburner");
 	/** Chunk copies waiting may take this much memory; past it, chunks that leave aren't kept. */
-	private static final long SNAPSHOT_LIMIT = 128L << 20;
+	private static final long SNAPSHOT_LIMIT = (Mobile.ACTIVE ? 32L : 128L) << 20;
 	private static final long SAVE_EVERY = 30_000_000_000L;
 	/** {@code -Dafterburner.lodStats=true}: logs how long converting chunks and building nodes take (for benchmarks). */
 	private static final boolean STATS = Boolean.getBoolean("afterburner.lodStats");

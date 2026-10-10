@@ -19,8 +19,8 @@ repositories {
 }
 
 sourceSets {
-	// Work in progress that isn't released yet: the shader pack loader, upscaling and far terrain, as a mod of its own
-	// (afterburner_labs) that plugs into Afterburner. The dev client loads it; the release jar leaves it out.
+	// The experimental parts: the shader pack loader, upscaling and far terrain, as a mod of its own (afterburner_labs)
+	// that plugs into Afterburner. The released jar carries it inside (see jar below), and the dev client loads it.
 	labs
 	// The benchmark and check commands used while developing (afterburner_bench). Also only in the dev client.
 	bench
@@ -48,6 +48,7 @@ loom {
 			client()
 			configName = "Compat Client"
 			runDir "run-compat"
+			source sourceSets.labs
 		}
 		client {
 			// The dev client loads the labs and the bench tools too (the labs' classpath has both).

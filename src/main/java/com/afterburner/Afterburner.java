@@ -13,7 +13,7 @@ public class Afterburner implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
-		LOGGER.info("Afterburner loaded");
+		LOGGER.info(Mobile.ACTIVE ? "Afterburner loaded (phone or tablet: mobile defaults)" : "Afterburner loaded");
 	}
 
 	public static Identifier id(String path) {
