@@ -17,6 +17,7 @@
 		"particle.ParticleLightMixin",
 		"particle.ParticleViewAccessor",
 		"particle.SeenSectionMixin",
+		"perf.DebugScreenMixin",
 		"perf.FpsTargetCloudsMixin",
 		"perf.FpsTargetExtractMixin",
 		"perf.FpsTargetFogMixin",
