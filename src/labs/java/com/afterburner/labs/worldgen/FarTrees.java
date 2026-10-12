@@ -57,6 +57,8 @@ import net.minecraft.world.level.levelgen.feature.RandomBooleanSelectorFeature;
 import net.minecraft.world.level.levelgen.feature.RandomSelectorFeature;
 import net.minecraft.world.level.levelgen.feature.SimpleRandomSelectorFeature;
 import net.minecraft.world.level.levelgen.feature.TreeFeature;
+import net.minecraft.world.level.levelgen.feature.IcebergFeature;
+import net.minecraft.world.level.levelgen.feature.SpikeFeature;
 import net.minecraft.world.level.levelgen.feature.WeightedPlacedFeature;
 import net.minecraft.world.level.levelgen.placement.FeaturePlacer;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
@@ -130,6 +132,8 @@ public final class FarTrees {
 	private final @Nullable FarStructures structures;
 	/** Per biome: the places in {@link #features} of its trees, in order. */
 	private final Map<Holder<Biome>, int[]> byBiome = new IdentityHashMap<>();
+	/** Big ice the game puts down in other steps: icebergs before the buildings, ice spikes after them; null if none. */
+	private final @Nullable Ice icebergs, iceSpikes;
 	/** Per feature (by place): how often it failed in the stand-in world; past {@link #FAILURES} it's left out. */
 	private final int[] failures;
 	private static final int FAILURES = 16;
@@ -151,6 +155,8 @@ public final class FarTrees {
 		FeatureSorter.StepFeatureData data = step < steps.size() ? steps.get(step) : null;
 		this.features = data == null ? List.of() : data.features();
 		this.failures = new int[features.size()];
+		this.icebergs = Ice.of(generator, steps, GenerationStep.Decoration.LOCAL_MODIFICATIONS, f -> f instanceof IcebergFeature);
+		this.iceSpikes = Ice.of(generator, steps, GenerationStep.Decoration.SURFACE_STRUCTURES, f -> f instanceof SpikeFeature);
 		if (data == null) return;
 		boolean[] tree = new boolean[features.size()];
 		for (int i = 0; i < tree.length; i++) {
@@ -166,6 +172,39 @@ public final class FarTrees {
 				if (i >= 0 && i < tree.length && tree[i]) mine.set(i);
 			}
 			if (!mine.isEmpty()) byBiome.put(biome, mine.stream().toArray());
+		}
+	}
+
+	/** One step's big ice features (by the step's index, which their seeds come from) and the biomes that have them. */
+	private static final class Ice {
+		final int step;
+		final List<PlacedFeature> features;
+		final Map<Holder<Biome>, int[]> byBiome = new IdentityHashMap<>();
+		final int[] failures;
+
+		private Ice(int step, List<PlacedFeature> features) {
+			this.step = step;
+			this.features = features;
+			this.failures = new int[features.size()];
+		}
+
+		static @Nullable Ice of(ChunkGenerator generator, List<FeatureSorter.StepFeatureData> steps, GenerationStep.Decoration decoration,
+				java.util.function.Predicate<Feature> is) {
+			int step = decoration.ordinal();
+			if (step >= steps.size()) return null;
+			FeatureSorter.StepFeatureData data = steps.get(step);
+			Ice ice = new Ice(step, data.features());
+			for (Holder<Biome> biome : generator.getBiomeSource().possibleBiomes()) {
+				List<HolderSet<PlacedFeature>> all = generator.getBiomeGenerationSettings(biome).features();
+				if (step >= all.size()) continue;
+				BitSet mine = new BitSet();
+				for (Holder<PlacedFeature> f : all.get(step)) {
+					int i = data.indexMapping().applyAsInt(f.value());
+					if (i >= 0 && i < ice.features.size() && f.value().getFeatures().anyMatch(h -> is.test(h.value()))) mine.set(i);
+				}
+				if (!mine.isEmpty()) ice.byBiome.put(biome, mine.stream().toArray());
+			}
+			return ice.byBiome.isEmpty() ? null : ice;
 		}
 	}
 
@@ -218,7 +257,7 @@ public final class FarTrees {
 
 	/** Whether the world has any trees or buildings at all. */
 	public boolean any() {
-		return !byBiome.isEmpty() || structures != null;
+		return !byBiome.isEmpty() || structures != null || icebergs != null || iceSpikes != null;
 	}
 
 	public @Nullable FarStructures structures() {
@@ -269,7 +308,7 @@ public final class FarTrees {
 		private final StandIn nursery = new StandIn();
 		private final WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(0L));
 		private final FeaturePlacer placer = new FeaturePlacer(world, generator);
-		private final BitSet wanted = new BitSet();
+		private final BitSet wanted = new BitSet(), wantedIcebergs = new BitSet(), wantedSpikes = new BitSet();
 		private final ReferenceOpenHashSet<Holder<Biome>> seen = new ReferenceOpenHashSet<>();
 		/** Trees grown (features placed that put something down), and chunks with buildings, for the check command. */
 		public long placed, built;
@@ -282,11 +321,13 @@ public final class FarTrees {
 		 * down from the few of each kind grown before; and its buildings' parts if {@code buildings} (the chunk is on the
 		 * ground's own sheet: some pieces take their height from the ground the first time they're put down).
 		 */
-		public Grown grow(int cx, int cz, Ground ground, boolean exact, boolean buildings) {
+		public Grown grow(int cx, int cz, Ground ground, boolean exact, boolean buildings, boolean trees) {
 			world.reset(ground);
 			int ox = cx << 4, oz = cz << 4;
 			// As the game: the trees of every biome around (it reads them off the chunks around), each sees its own.
 			wanted.clear();
+			wantedIcebergs.clear();
+			wantedSpikes.clear();
 			seen.clear();
 			for (int qz = (oz >> 2) - 1; qz <= (oz >> 2) + 4; qz++) {
 				for (int qx = (ox >> 2) - 1; qx <= (ox >> 2) + 4; qx++) {
@@ -296,12 +337,19 @@ public final class FarTrees {
 						if (!seen.add(biome)) continue;
 						int[] mine = byBiome.get(biome);
 						if (mine != null) for (int i : mine) wanted.set(i);
+						if (icebergs != null && (mine = icebergs.byBiome.get(biome)) != null) for (int i : mine) wantedIcebergs.set(i);
+						if (iceSpikes != null && (mine = iceSpikes.byBiome.get(biome)) != null) for (int i : mine) wantedSpikes.set(i);
 					}
 				}
 			}
-			List<FarStructures.Placed> touching = structures == null || !buildings ? List.of() : structures.touching(cx, cz);
-			if (wanted.isEmpty() && touching.isEmpty()) return new Grown(new long[0], new BlockState[0]);
+			// Further out, only the big ice.
+			if (!trees) wanted.clear();
+			List<FarStructures.Placed> touching = structures == null || !buildings || !trees ? List.of() : structures.touching(cx, cz);
+			if (wanted.isEmpty() && touching.isEmpty() && wantedIcebergs.isEmpty() && wantedSpikes.isEmpty()) return new Grown(new long[0], new BlockState[0]);
 			long decorationSeed = random.setDecorationSeed(seed, ox, oz);
+			BlockPos origin = new BlockPos(ox, level.getMinSectionY() << 4, oz);
+			// The game's steps in order: icebergs, then the buildings, then ice spikes, then the trees.
+			placeIce(icebergs, wantedIcebergs, decorationSeed, origin);
 			// The buildings first, as the game (their step comes before the trees').
 			if (!touching.isEmpty()) {
 				ground.building(true);
@@ -312,7 +360,7 @@ public final class FarTrees {
 				}
 				built++;
 			}
-			BlockPos origin = new BlockPos(ox, level.getMinSectionY() << 4, oz);
+			placeIce(iceSpikes, wantedSpikes, decorationSeed, origin);
 			for (int i = wanted.nextSetBit(0); i >= 0; i = wanted.nextSetBit(i + 1)) {
 				if (failures[i] >= FAILURES) continue;
 				random.setFeatureSeed(decorationSeed, i, step);
@@ -325,6 +373,19 @@ public final class FarTrees {
 				}
 			}
 			return world.grown();
+		}
+
+		private void placeIce(@Nullable Ice ice, BitSet wanted, long decorationSeed, BlockPos origin) {
+			if (ice == null) return;
+			for (int i = wanted.nextSetBit(0); i >= 0; i = wanted.nextSetBit(i + 1)) {
+				if (ice.failures[i] >= FAILURES) continue;
+				random.setFeatureSeed(decorationSeed, i, ice.step);
+				try {
+					if (placer.placeWithBiomeCheck(ice.features.get(i), random, origin)) placed++;
+				} catch (RuntimeException e) {
+					if (ice.failures[i]++ == 0) Afterburner.LOGGER.warn("[Afterburner] Far land: an ice feature failed in the far land: {}", ice.features.get(i), e);
+				}
+			}
 		}
 
 		/**

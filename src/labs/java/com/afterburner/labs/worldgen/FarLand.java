@@ -57,7 +57,7 @@ import java.util.List;
  */
 public final class FarLand {
 	/** Bumped when what's made changes, so land made by an older version is made again: 1 to 127. */
-	public static final int VERSION = 5;
+	public static final int VERSION = 6;
 	/** Palette places with a fixed meaning: air, and solid ground nothing sees. */
 	public static final int AIR = 0, HIDDEN = 1;
 	/** Surface rules are asked this many blocks down a cliff at most; below that it's the plain ground block. */
@@ -84,8 +84,10 @@ public final class FarLand {
 	private static final int MAX_SEG = 8;
 	/** Trees are grown at this level and below (a sheet of 16 chunks); further out they'd hardly show. */
 	public static final int TREE_LEVELS = 2;
+	/** The levels big ice (icebergs, ice spikes) is put down at: further than the trees, it's seen from far. */
+	public static final int ICE_LEVELS = 4;
 	/** A tree reaches at most this far from its trunk: the chunks this close to a sheet are grown for it too. */
-	private static final int TREE_REACH = 8;
+	private static final int TREE_REACH = 16;
 	/** Chunks whose trees a sampler keeps for the sheets next to them. */
 	private static final int TREES_KEPT = 192;
 	/** How far down what the surface rules put under the top block goes, for the trees' stand-in world. */
@@ -445,7 +447,7 @@ public final class FarLand {
 			}
 			long t2 = System.nanoTime();
 			surfaceNanos += t2 - t1;
-			if (grower != null && growTrees && level <= TREE_LEVELS) {
+			if (grower != null && growTrees && level <= ICE_LEVELS) {
 				plantTrees(sheet, level, x0, z0, s);
 				treeNanos += System.nanoTime() - t2;
 			}
@@ -482,7 +484,7 @@ public final class FarLand {
 					long key = treeKey(level, cx, cz);
 					Kept k = kept.getAndMoveToFirst(key);
 					if (k == null || inside && !k.exact()) {
-						k = new Kept(grower.grow(cx, cz, this, level == 0, inside), inside);
+						k = new Kept(grower.grow(cx, cz, this, level == 0, inside, level <= TREE_LEVELS), inside);
 						treeChunks++;
 						kept.putAndMoveToFirst(key, k);
 						if (kept.size() > TREES_KEPT) kept.removeLast();
