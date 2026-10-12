@@ -5,9 +5,65 @@ import com.afterburner.labs.shaderpack.PackMacros;
 import java.util.Arrays;
 import org.jspecify.annotations.Nullable;
 
-/** Which gbuffers program draws what each of the game's pipelines draws, and its render stage, by the pipeline's name. */
+/**
+ * Which gbuffers program draws what each of the game's shaders draws, and its render stage. A shader is named as the pipeline
+ * that draws the same in later versions of the game ({@link #shaderPath}), from its own name and what the game is drawing.
+ */
 final class ProgramMapping {
 	private ProgramMapping() {
+	}
+
+	/**
+	 * A game shader's name ("rendertype_cutout_mipped", "afterburner_compact_solid", "particle") as the pipeline's that draws
+	 * the same ("cutout_terrain"), by what's being drawn: {@code phase} is the part of the frame, {@code blend} whether it
+	 * blends, {@code sky} what the sky draws.
+	 */
+	static String shaderPath(String shader, Shaderpacks.Phase phase, boolean blend, Shaderpacks.SkyStage sky) {
+		String n = shader;
+		int colon = n.indexOf(':');
+		if (colon >= 0) n = n.substring(colon + 1);
+		if (n.startsWith("rendertype_")) n = n.substring("rendertype_".length());
+		if (n.startsWith("afterburner_compact_")) n = n.substring("afterburner_compact_".length());
+		boolean blocks = phase == Shaderpacks.Phase.ENTITIES || phase == Shaderpacks.Phase.BLOCK_ENTITIES;
+		switch (n) {
+			case "solid":
+				return blocks ? "solid_block" : "solid_terrain";
+			case "cutout", "cutout_mipped":
+				return blocks ? "cutout_block" : "cutout_terrain";
+			case "translucent":
+				return blocks ? "translucent_block" : "translucent_terrain";
+			case "translucent_moving_block":
+				return "translucent_block";
+			case "tripwire":
+				return "translucent_terrain";
+			case "particle":
+				return phase == Shaderpacks.Phase.WEATHER ? "weather" : blend ? "translucent_particle" : "opaque_particle";
+			// The game's clouds are a mesh here (later versions build them in their shader): the pack's gbuffers_clouds draws it.
+			case "clouds":
+				return "vanilla_clouds";
+			default:
+				break;
+		}
+		if (phase == Shaderpacks.Phase.SKY) {
+			switch (n) {
+				case "position":
+					return sky == Shaderpacks.SkyStage.STARS ? "stars" : "sky";
+				case "position_color":
+					return "sunrise_sunset";
+				case "position_tex":
+					return "celestial";
+				case "position_tex_color":
+					return "end_sky";
+				default:
+					break;
+			}
+		}
+		if (phase == Shaderpacks.Phase.WEATHER && n.equals("position_tex")) return "world_border";
+		// Block entities are drawn with the entities' shaders (chests, signs, banners): the pack's block program draws them.
+		if (phase == Shaderpacks.Phase.BLOCK_ENTITIES && entityLike(n) && !n.contains("glint") && !n.startsWith("text")) {
+			return blend ? "translucent_block" : "solid_block";
+		}
+		return n;
 	}
 
 	/**
@@ -75,6 +131,8 @@ final class ProgramMapping {
 			// The game's clouds are built in the vertex shader from a texture; packs draw their own.
 			case "clouds", "flat_clouds":
 				return null;
+			case "vanilla_clouds":
+				return "gbuffers_clouds";
 			default:
 				break;
 		}
@@ -95,6 +153,7 @@ final class ProgramMapping {
 			return stage(switch (name) {
 				case "sunrise_sunset" -> "SUNSET";
 				case "stars" -> "STARS";
+				case "void" -> "VOID";
 				case "celestial", "end_sky" -> "CUSTOM_SKY";
 				default -> "SKY";
 			});
@@ -108,7 +167,7 @@ final class ProgramMapping {
 			case "opaque_particle", "particle", "translucent_particle" -> "PARTICLES";
 			case "weather" -> "RAIN_SNOW";
 			case "world_border" -> "WORLD_BORDER";
-			case "clouds", "flat_clouds" -> "CLOUDS";
+			case "clouds", "flat_clouds", "vanilla_clouds" -> "CLOUDS";
 			case "secondary_block_outline" -> "OUTLINE";
 			default -> name.startsWith("lines") ? "OUTLINE"
 				: name.startsWith("debug_") ? "DEBUG"
@@ -122,7 +181,6 @@ final class ProgramMapping {
 		return Math.max(0, Arrays.asList(PackMacros.RENDER_STAGES).indexOf(stage));
 	}
 
-	/** A pipeline's name without what Afterburner and the game add to it ("pipeline/compact_solid_terrain_extended"). */
 	/**
 	 * The alpha test for a pipeline whose program the pack gives none: where the game cuts out what it draws ({@code cutout}, the
 	 * pipeline's ALPHA_CUTOUT, null for nowhere), as Iris, which keeps water and glass down to nearly no alpha in the gbuffers;
@@ -140,11 +198,12 @@ final class ProgramMapping {
 			}
 		}
 		return switch (name) {
-			case "opaque_particle", "translucent_particle", "weather", "clouds", "flat_clouds", "crumbling", "eyes" -> AlphaCutoff.ONE_TENTH;
+			case "opaque_particle", "translucent_particle", "weather", "clouds", "flat_clouds", "vanilla_clouds", "crumbling", "eyes" -> AlphaCutoff.ONE_TENTH;
 			default -> name.startsWith("text") ? AlphaCutoff.NON_ZERO : AlphaCutoff.OFF;
 		};
 	}
 
+	/** A pipeline's name without what Afterburner and the game add to it ("pipeline/compact_solid_terrain_extended"). */
 	private static String name(String path) {
 		String name = path.startsWith("pipeline/") ? path.substring("pipeline/".length()) : path;
 		if (name.endsWith("_multidraw")) name = name.substring(0, name.length() - "_multidraw".length());

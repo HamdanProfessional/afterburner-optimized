@@ -1,48 +1,52 @@
 package com.afterburner.labs.mixin.shader;
 
-import com.afterburner.labs.shaderpack.game.ShadowEntities;
 import com.afterburner.labs.shaderpack.game.Shaderpacks;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.renderpearl.api.commands.RenderPass;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.SubmitNodeCollector;
-import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
-import net.minecraft.client.renderer.state.level.LevelRenderState;
-import org.spongepowered.asm.mixin.Final;
+import net.minecraft.client.renderer.PostChain;
+import net.minecraft.util.profiling.ProfilerFiller;
+import org.joml.Matrix4f;
+import org.jspecify.annotations.Nullable;
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * A shader pack's entity shadows: the entities cast them without being drawn (ShadowEntities) submitted after the game's, and the
- * shadows drawn once the game prepared its entity draws. The pack's deferred passes between the opaque world and translucents.
+ * The world's drawing with a pack: the pack's frame starts in place of the game's clear, the profiler's sections tell it
+ * which part of the frame is drawn, and Fabulous graphics' own buffers are left out (the pack draws everything into its own).
  */
 @Mixin(LevelRenderer.class)
-public class PackLevelRendererMixin {
-	@Shadow
-	@Final
-	private EntityRenderDispatcher entityRenderDispatcher;
-
-	@Inject(method = "submitEntities", at = @At("TAIL"))
-	private void afterburner$shadowEntities(PoseStack poseStack, LevelRenderState levelRenderState, SubmitNodeCollector output, CallbackInfo ci) {
-		ShadowEntities.submit(this.entityRenderDispatcher, poseStack, levelRenderState.cameraRenderState, output);
+public abstract class PackLevelRendererMixin {
+	@WrapOperation(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;clear(IZ)V"))
+	private void afterburner$beginPack(int mask, boolean checkError, Operation<Void> original, @Local(argsOnly = true) DeltaTracker delta,
+			@Local(argsOnly = true, ordinal = 0) Matrix4f view, @Local(argsOnly = true, ordinal = 1) Matrix4f projection) {
+		if (!Shaderpacks.beginLevel(Minecraft.getInstance(), delta, view, projection)) original.call(mask, checkError);
 	}
 
-	@ModifyExpressionValue(method = "render", at = @At(value = "INVOKE",
-			target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher;prepareFrame(Lnet/minecraft/client/renderer/SubmitNodeStorage;)Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;"))
-	private FeatureRenderDispatcher.PreparedFrame afterburner$entityShadows(FeatureRenderDispatcher.PreparedFrame features) {
-		if (Shaderpacks.active()) Shaderpacks.entityShadows(features);
-		return features;
+	@WrapOperation(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/profiling/ProfilerFiller;popPush(Ljava/lang/String;)V"))
+	private void afterburner$section(ProfilerFiller profiler, String name, Operation<Void> original) {
+		original.call(profiler, name);
+		Shaderpacks.section(name);
 	}
 
-	@Inject(method = "executeClassicTransparency", at = @At("HEAD"))
-	private void afterburner$deferred(ChunkSectionsToRender sections, FeatureRenderDispatcher.PreparedFrame featureFrame, RenderPass renderPass,
-			CallbackInfo ci) {
-		if (Shaderpacks.active()) Shaderpacks.beforeTranslucents(renderPass);
+	@ModifyExpressionValue(method = "renderLevel", at = @At(value = "FIELD", opcode = Opcodes.GETFIELD,
+			target = "Lnet/minecraft/client/renderer/LevelRenderer;transparencyChain:Lnet/minecraft/client/renderer/PostChain;"))
+	private @Nullable PostChain afterburner$noFabulous(@Nullable PostChain chain) {
+		return Shaderpacks.hidesFabulous() ? null : chain;
+	}
+
+	@ModifyExpressionValue(method = "renderLevel", at = {
+		@At(value = "FIELD", opcode = Opcodes.GETFIELD, target = "Lnet/minecraft/client/renderer/LevelRenderer;translucentTarget:Lcom/mojang/blaze3d/pipeline/RenderTarget;"),
+		@At(value = "FIELD", opcode = Opcodes.GETFIELD, target = "Lnet/minecraft/client/renderer/LevelRenderer;itemEntityTarget:Lcom/mojang/blaze3d/pipeline/RenderTarget;"),
+		@At(value = "FIELD", opcode = Opcodes.GETFIELD, target = "Lnet/minecraft/client/renderer/LevelRenderer;weatherTarget:Lcom/mojang/blaze3d/pipeline/RenderTarget;")
+	})
+	private @Nullable RenderTarget afterburner$noFabulousTarget(@Nullable RenderTarget target) {
+		return Shaderpacks.hidesFabulous() ? null : target;
 	}
 }

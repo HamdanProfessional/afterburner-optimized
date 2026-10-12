@@ -1,22 +1,16 @@
 package com.afterburner.labs.lod;
 
 import com.afterburner.labs.LabsFeatures;
-import com.afterburner.labs.mixin.lod.ChunkSectionsAccessor;
 import com.afterburner.labs.shaderpack.game.Shaderpacks;
-import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
-import com.mojang.renderpearl.api.commands.RenderPass;
-import com.mojang.renderpearl.api.pipeline.CompiledRenderPipeline;
-import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.renderer.FogRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
-import net.minecraft.client.renderer.fog.FogData;
-import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
@@ -27,6 +21,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.material.FogType;
 import net.minecraft.world.level.storage.LevelResource;
+import org.joml.Matrix4f;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,16 +31,24 @@ import java.nio.file.Path;
 /**
  * Far terrain: the land past the render distance, drawn as simple colored blocks from the chunks seen before. Every
  * chunk the game lets go of is copied ({@link LodSnapshot}) and turned into coarser and coarser columns on a background
- * thread ({@link LodWorker}), kept on disk per world and dimension ({@link LodWorld}), and drawn in the main pass after
- * the solid terrain ({@link LodRenderer}). The render distance fog moves out to the far terrain's edge.
+ * thread ({@link LodWorker}), kept on disk per world and dimension ({@link LodWorld}), and drawn after the solid and
+ * cutout terrain ({@link LodRenderer}). The render distance fog moves out to the far terrain's edge.
  * <p>
  * With a shader pack that has Distant Horizons' programs, the pack draws it with its dh_terrain, as it would Distant Horizons'
- * (see PackRenderer#drawFarTerrain), and does its own fog.
+ * (see PackRenderer#drawFarTerrain), and does its own fog: see {@link #drawForPack}.
  * <p>
  * Our own design: it borrows the idea (keep what was seen, simplify it level by level) from Voxy and Distant Horizons,
  * none of their code, and needs no other mod.
  */
 public final class Lod {
+	/**
+	 * The far terrain's vertex attributes, by location: 0 {@code uint Position} (x, z and the face in bits 0-16 as
+	 * (z * 129 + x) * 6 + face, faces down, up, north, south, west, east; the material in bits 17-19; y in 20-31; all in voxels
+	 * from the node's corner), read with glVertexAttribIPointer; 1 {@code vec4 Color} (four unsigned bytes, normalized: the
+	 * color, and in alpha the sky light in the high 4 bits and the block light in the low 4). A program drawing it binds these
+	 * names to these locations before it's linked. 8 bytes a vertex, 4 vertices a quad.
+	 */
+	public static final String[] PACK_ATTRIBUTES = {"Position", "Color"};
 	private static final Logger LOGGER = LoggerFactory.getLogger("afterburner");
 	private static @Nullable LodWorker worker;
 	private static @Nullable LodWorld world;
@@ -56,7 +59,6 @@ public final class Lod {
 	private static boolean prepared, failed;
 	/** This frame's far terrain is drawn by the shader pack, with the chunks' view matrix. */
 	private static boolean throughPack;
-	private static @Nullable GpuBufferSlice terrainUniform;
 	/** The water left for the shader pack's pass for it ({@link #drawForPack} drew the rest). */
 	private static boolean waterPending;
 	private static boolean unseenLand = LodSettings.unseenLand();
@@ -108,11 +110,11 @@ public final class Lod {
 		if (level == worldLevel && world != null) return world;
 		closeWorld();
 		Minecraft mc = Minecraft.getInstance();
-		ResourceLocation dimension = level.dimension().identifier();
+		ResourceLocation dimension = level.dimension().location();
 		Path folder = mc.gameDirectory.toPath().resolve("afterburner").resolve("lod").resolve(worldName(mc))
 				.resolve(clean(dimension.getNamespace() + "_" + dimension.getPath()));
-		world = new LodWorld(folder, level.getMinY(), level.getHeight(), level.dimensionType().hasSkyLight(),
-				level.registryAccess().lookupOrThrow(Registries.BIOME));
+		world = new LodWorld(folder, level.getMinBuildHeight(), level.getHeight(), level.dimensionType().hasSkyLight(),
+				level.registryAccess().registryOrThrow(Registries.BIOME));
 		world.generator = LodGenerator.create(worker(), world, level);
 		worldLevel = level;
 		return world;
@@ -155,7 +157,7 @@ public final class Lod {
 	private static void chunkUnloaded(ClientLevel level, LevelChunk chunk) {
 		if (!recording()) return;
 		try {
-			if (renderer != null && level == worldLevel) renderer.chunkGone(chunk.getPos().x(), chunk.getPos().z());
+			if (renderer != null && level == worldLevel) renderer.chunkGone(chunk.getPos().x, chunk.getPos().z);
 			LodWorker wk = worker();
 			if (wk.hasRoom() && lit(level, chunk)) wk.add(new LodSnapshot(world(level), level, chunk));
 		} catch (RuntimeException e) {
@@ -169,13 +171,13 @@ public final class Lod {
 	 * stone at the far terrain's edge.
 	 */
 	static boolean lit(ClientLevel level, LevelChunk chunk) {
-		return level.getLightEngine().lightOnInColumn(SectionPos.getZeroNode(chunk.getPos().x(), chunk.getPos().z()));
+		return level.getLightEngine().lightOnInSection(SectionPos.of(chunk.getPos(), 0));
 	}
 
-	/** A section of the game's got a mesh or lost it; any thread. */
-	public static void sectionChanged(long sectionNode) {
+	/** A section of the game's in this chunk got a mesh or lost it; any thread. */
+	public static void sectionChanged(int chunkX, int chunkZ) {
 		LodRenderer r = renderer;
-		if (r != null) r.sectionChanged(SectionPos.x(sectionNode), SectionPos.z(sectionNode));
+		if (r != null) r.sectionChanged(chunkX, chunkZ);
 	}
 
 	/** The level is going away (another dimension, or leaving the world): keeps the chunks still loaded around the player. */
@@ -187,8 +189,8 @@ public final class Lod {
 				LodWorker wk = worker();
 				ChunkPos center = mc.player.chunkPosition();
 				int r = mc.options.getEffectiveRenderDistance() + 3;
-				for (int z = center.z() - r; z <= center.z() + r && wk.hasRoom(); z++) {
-					for (int x = center.x() - r; x <= center.x() + r && wk.hasRoom(); x++) {
+				for (int z = center.z - r; z <= center.z + r && wk.hasRoom(); z++) {
+					for (int x = center.x - r; x <= center.x + r && wk.hasRoom(); x++) {
 						LevelChunk chunk = level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
 						if (chunk != null && lit(level, chunk)) wk.add(new LodSnapshot(w, level, chunk));
 					}
@@ -209,11 +211,13 @@ public final class Lod {
 
 	// ---- Drawing ----
 
-	/** Before the main pass is recorded. */
-	public static void prepare(LevelRenderer levelRenderer, CameraRenderState camera, ChunkSectionsToRender sections) {
+	/**
+	 * In LevelRenderer.renderLevel, before the solid terrain: {@code modelView} and {@code projection} are the ones it's drawn
+	 * with (the camera's rotation, and the projection with the far plane {@link #depthFar} moved out).
+	 */
+	public static void prepare(LevelRenderer levelRenderer, Camera camera, Matrix4f modelView, Matrix4f projection) {
 		prepared = false;
 		waterPending = false;
-		terrainUniform = null;
 		if (failed && renderer != null) closeQuietly();
 		Minecraft mc = Minecraft.getInstance();
 		ClientLevel level = mc.level;
@@ -226,46 +230,60 @@ public final class Lod {
 			unseenLand = LodSettings.unseenLand();
 			if (renderer == null) renderer = new LodRenderer(w, worker());
 			throughPack = Shaderpacks.active();
-			terrainUniform = ((ChunkSectionsAccessor) sections).afterburner$terrainTransformUBO();
-			renderer.prepare(mc, levelRenderer, level, camera, throughPack ? Shaderpacks.farTerrainProjection() : null);
+			renderer.prepare(mc, levelRenderer, level, camera, modelView, projection, throughPack ? Shaderpacks.farTerrainProjection() : null);
 			prepared = true;
 		} catch (RuntimeException e) {
 			fail("preparing", e);
 		}
+		// With a pack, it draws the far terrain now, before the game's terrain.
+		if (prepared && throughPack) Shaderpacks.farTerrain();
 	}
 
-	/** In the main pass, right after the solid terrain. */
-	public static void draw(RenderPass pass, ChunkSectionsToRender sections) {
+	/** In LevelRenderer.renderLevel, right after the solid and cutout terrain. */
+	public static void draw() {
 		if (!prepared || renderer == null || throughPack) return;
 		prepared = false;
 		try {
-			renderer.draw(pass, ((ChunkSectionsAccessor) sections).afterburner$terrainTransformUBO());
+			renderer.draw();
 		} catch (RuntimeException e) {
-			// The pass still uses the buffers: they're let go before the next frame (prepare).
 			failed = true;
 			LOGGER.error("[Afterburner] Far terrain failed while drawing; it's off until restart", e);
 		}
 	}
 
-	/** The game's pipeline for the far terrain: what a shader pack's dh_terrain is made for. */
-	public static RenderPipeline packPipeline() {
-		return LodRenderer.pipeline();
-	}
-
-	/** The game's pipeline for the far terrain's water: what a shader pack's dh_water is made for. */
-	public static RenderPipeline packWaterPipeline() {
-		return LodRenderer.waterPipeline();
-	}
-
-	/** Afterburner's own pipeline for the floor under the far water, in a shader pack's depth (see LodRenderer). */
-	public static RenderPipeline packFloorPipeline() {
-		return LodRenderer.floorPipeline();
-	}
+	/*
+	 * Drawn by a shader pack: between prepare (before the solid terrain) and the end of LevelRenderer.renderLevel, on the
+	 * render thread, the pack calls drawForPack once (with its dh_terrain), then while waterPendingForPack drawWaterForPack,
+	 * with floorProgram() (last false) and with its dh_water (last true).
+	 *
+	 * Each draw is with a linked GL program already in use (glUseProgram is the caller's; Lod never calls it on a pack's
+	 * program), with PACK_ATTRIBUTES bound to locations 0 and 1, into the framebuffer the caller bound, with the depth test,
+	 * depth writes, blending and culling as the caller set them. The floor program writes depth only (gl_FragDepth, no color
+	 * output): the caller has color writes off for it, or a framebuffer without color.
+	 *
+	 * Lod sets these uniforms, found by name with glGetUniformLocation (once a frame per program id), skipping any the
+	 * program doesn't have (-1):
+	 *   ivec3 CameraBlockPos  the camera's block (the floor of its position);
+	 *   vec3  CameraOffset    CameraBlockPos minus the camera's exact position (each in (-1, 0]);
+	 *   mat4  ModelViewMat    the camera's rotation: the view matrix renderLevel draws the terrain with;
+	 *   mat4  DhProjection    Shaderpacks.farTerrainProjection() as of prepare (OpenGL depth);
+	 *   ivec4 DrawnY          x to y: the heights (blocks) the game draws its chunks between (on 1.21.1, all of the world);
+	 * and per node, before its draw:
+	 *   ivec4 NodeOrigin      xyz: the node's corner in world blocks (y: the world's bottom), w: blocks per voxel;
+	 *   ivec4 NodeFlags       x: 1 for nodes at levels 0 and 1 (whose quads never cross a chunk's border), else 0.
+	 * A vertex is at vec3(NodeOrigin.xyz - CameraBlockPos) + voxel * NodeOrigin.w + CameraOffset from the camera, voxel being
+	 * vec3((Position & 131071u) / 6u % 129u, Position >> 20u, (Position & 131071u) / 774u). Everything else (ProjMat, the
+	 * fog, the lightmap and other textures, the pack's own uniforms) is the caller's. The quads are drawn as triangles with
+	 * the game's quad index buffer (RenderSystem.getSequentialBuffer(QUADS)), so gl_VertexID & 3 is the corner in its quad.
+	 *
+	 * Left behind: the program still in use, with these uniforms at the last node's values; vertex array 0 bound and
+	 * BufferUploader invalidated; textures, framebuffer, depth, blend and cull state as they were.
+	 */
 
 	/** Whether there's far terrain for the shader pack to draw this frame. */
 	public static boolean drawsForPack() {
 		LodRenderer r = renderer;
-		return prepared && throughPack && r != null && terrainUniform != null && r.hasDraws();
+		return prepared && throughPack && r != null && r.hasDraws();
 	}
 
 	/** Whether some of this frame's far terrain is water. Before {@link #drawForPack}. */
@@ -275,17 +293,16 @@ public final class Lod {
 	}
 
 	/**
-	 * The shader pack's pass for it: drawn with its pipeline ({@code pipeline}, made from {@link #packPipeline}).
-	 * {@code withoutWater}: the water is left for {@link #drawWaterForPack}.
+	 * The shader pack's pass for it, with its dh_terrain {@code program} in use (see the contract above). {@code withoutWater}:
+	 * the water is left for {@link #drawWaterForPack}.
 	 */
-	public static void drawForPack(RenderPass pass, CompiledRenderPipeline pipeline, boolean withoutWater) {
+	public static void drawForPack(int program, boolean withoutWater) {
 		LodRenderer r = renderer;
-		GpuBufferSlice terrain = terrainUniform;
-		if (!prepared || !throughPack || r == null || terrain == null) return;
+		if (!prepared || !throughPack || r == null) return;
 		prepared = false;
 		waterPending = withoutWater;
 		try {
-			r.drawWith(pass, pipeline, terrain, withoutWater ? LodRenderer.SOLID : LodRenderer.ALL);
+			r.drawWith(program, withoutWater ? LodRenderer.SOLID : LodRenderer.ALL);
 		} catch (RuntimeException e) {
 			failed = true;
 			waterPending = false;
@@ -295,20 +312,29 @@ public final class Lod {
 
 	/** Whether {@link #drawForPack} left the water to draw. */
 	public static boolean waterPendingForPack() {
-		return waterPending && !failed && renderer != null && terrainUniform != null;
+		return waterPending && !failed && renderer != null;
 	}
 
 	/**
-	 * The water {@link #drawForPack} left, with {@code pipeline}: the floor's ({@link #packFloorPipeline}) or the pack's for
-	 * it (made from {@link #packWaterPipeline}, the last).
+	 * Afterburner's own program for the floor under the far water, in the pack's depth (far_water_floor, see
+	 * LodRenderer#floorProgram), built the first time it's asked for: the caller puts it in use for the first
+	 * {@link #drawWaterForPack}. 0 if it didn't build (that draw is then left out).
 	 */
-	public static void drawWaterForPack(RenderPass pass, CompiledRenderPipeline pipeline, boolean last) {
+	public static int floorProgram() {
+		return LodRenderer.floorProgram();
+	}
+
+	/**
+	 * The water {@link #drawForPack} left, with {@code program} in use: {@link #floorProgram} ({@code last} false), then the
+	 * pack's dh_water ({@code last} true, the last).
+	 */
+	public static void drawWaterForPack(int program, boolean last) {
 		LodRenderer r = renderer;
-		GpuBufferSlice terrain = terrainUniform;
-		if (!waterPendingForPack() || r == null || terrain == null) return;
+		if (!waterPendingForPack() || r == null) return;
 		if (last) waterPending = false;
+		if (program == 0) return;
 		try {
-			r.drawWith(pass, pipeline, terrain, LodRenderer.WATER);
+			r.drawWith(program, LodRenderer.WATER);
 		} catch (RuntimeException e) {
 			failed = true;
 			waterPending = false;
@@ -321,26 +347,26 @@ public final class Lod {
 		return active() && !fogHides && !Shaderpacks.active() ? Math.max(far, blocks() * 1.5F) : far;
 	}
 
-	/** Moves the render distance fog to the far terrain's edge, and the haze of distance with it. */
-	public static void adjustFog(FogData fog, Camera camera, int renderDistanceChunks) {
+	/**
+	 * After the terrain's fog is set up ({@code renderDistance}: the game's, in blocks): moves the render distance fog to the
+	 * far terrain's edge, as the game's own is at the edge of its chunks.
+	 */
+	public static void adjustFog(Camera camera, FogRenderer.FogMode mode, float renderDistance, boolean thickFog) {
+		if (mode != FogRenderer.FogMode.FOG_TERRAIN) return;
 		fogHides = false;
 		if (!active()) return;
-		float lod = blocks(), vanilla = renderDistanceChunks * 16.0F;
-		if (lod <= vanilla || camera.getFluidInCamera() != FogType.NONE || fog.environmentalEnd <= vanilla) {
+		float lod = blocks();
+		// Under water or lava, in the Nether's (or a boss's) thick fog, blind or in the dark: the fog ends nearer than the
+		// game's own chunks do.
+		if (lod <= renderDistance || camera.getFluidInCamera() != FogType.NONE || thickFog || RenderSystem.getShaderFogEnd() < renderDistance) {
 			fogHides = true;
 			return;
 		}
 		// Shader packs do their own fog (with dhRenderDistance).
 		if (Shaderpacks.active()) return;
 		float span = Mth.clamp(lod / 10.0F, 4.0F, 64.0F);
-		fog.renderDistanceStart = lod - span;
-		fog.renderDistanceEnd = lod;
-		// The sky's own haze ends at 1024 blocks; further terrain would vanish in it.
-		if (fog.environmentalEnd >= 256.0F && lod > 1024.0F) {
-			float scale = lod / 1024.0F;
-			fog.environmentalStart *= scale;
-			fog.environmentalEnd *= scale;
-		}
+		RenderSystem.setShaderFogStart(lod - span);
+		RenderSystem.setShaderFogEnd(lod);
 	}
 
 	private static void fail(String what, RuntimeException e) {

@@ -68,7 +68,7 @@ final class LodKinds {
 		if (block instanceof LiquidBlock) return fluid.is(FluidTags.LAVA) ? LAVA : fluid.is(FluidTags.WATER) ? WATER : SOLID;
 		if (block instanceof LeavesBlock || block instanceof SnowLayerBlock || block instanceof PowderSnowBlock) return SOLID;
 		try {
-			if (state.isSolidRender()) return SOLID;
+			if (state.isSolidRender(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)) return SOLID;
 			double volume = 0;
 			for (AABB box : state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).toAabbs()) {
 				volume += box.getXsize() * box.getYsize() * box.getZsize();

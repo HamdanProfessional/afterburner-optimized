@@ -48,7 +48,7 @@ public final class LabsAddon implements AfterburnerAddon {
 			b.setMessage(upscaleLabel());
 		}).tooltip(Tooltip.create(Component.translatable("afterburner.option.upscale.tooltip"))).width(310).build());
 		rows.header("afterburner.group.shaders");
-		rows.add(Button.builder(packsLabel(), b -> Minecraft.getInstance().gui.setScreen(new PacksScreen(rows.screen(), Minecraft.getInstance().options)))
+		rows.add(Button.builder(packsLabel(), b -> Minecraft.getInstance().setScreen(new PacksScreen(rows.screen(), Minecraft.getInstance().options)))
 				.tooltip(Tooltip.create(Component.translatable("afterburner.option.shaderpacks.tooltip"))).width(310).build());
 		rows.add(Button.builder(shadowUpdatesLabel(), b -> {
 			Shaderpacks.ShadowUpdates[] modes = Shaderpacks.ShadowUpdates.values();

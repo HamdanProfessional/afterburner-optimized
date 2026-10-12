@@ -2,7 +2,7 @@ package com.afterburner.labs.shaderpack.game;
 
 import com.afterburner.labs.shaderpack.PackImages;
 import com.afterburner.labs.shaderpack.PackLoader;
-import com.mojang.renderpearl.backend.opengl.GlStateManager;
+import com.mojang.blaze3d.platform.GlStateManager;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -14,7 +14,6 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL12C;
-import org.lwjgl.opengl.GL13C;
 import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL30C;
 import org.lwjgl.opengl.GL31C;
@@ -29,15 +28,12 @@ import org.slf4j.LoggerFactory;
 
 /**
  * A pack's custom images and storage buffers (shaders.properties' image.* and bufferObject.*), as plain OpenGL objects the
- * game's renderer doesn't know about: images are bound to image units and, under their sampler names, to texture units from
- * {@link #FIRST_SAMPLER_UNIT}; storage buffers to their index. The units are set in the pack's programs by
- * {@link ExternalBindings}, and kept bound here: the game's renderer never uses them.
+ * game's renderer doesn't know about: images are bound to image units and, under their sampler names, to the texture units
+ * of their slots ({@link PackSlots}); storage buffers to their index. The units are set in the pack's programs by
+ * {@link ExternalBindings}, and bound here once a frame: the game's renderer never uses them.
  */
 final class PackStorage implements AutoCloseable {
 	private static final Logger LOGGER = LoggerFactory.getLogger("afterburner");
-	/** Texture units of the images' samplers: past those the game's pipelines use (one per sampler, from 0). */
-	static final int FIRST_SAMPLER_UNIT = 48;
-	static final int SAMPLER_UNITS = 16;
 	/** A warning past this much memory in images and buffers. */
 	private static final long LARGE = 1L << 30;
 
@@ -109,13 +105,13 @@ final class PackStorage implements AutoCloseable {
 		return s;
 	}
 
-	PackStorage(PackLoader.Loaded pack, List<String> warnings) {
+	PackStorage(PackLoader.Loaded pack, PackSlots units, List<String> warnings) {
 		this.clearTexture = GL.getCapabilities().OpenGL44 || GL.getCapabilities().GL_ARB_clear_texture;
 		this.linear = sampler(GL11C.GL_LINEAR);
 		this.nearest = sampler(GL11C.GL_NEAREST);
 		Map<String, ExternalBindings.Slot> slots = new LinkedHashMap<>();
 		int maxImageUnits = GL11C.glGetInteger(GL42C.GL_MAX_IMAGE_UNITS);
-		int nextImageUnit = 0, nextSamplerUnit = FIRST_SAMPLER_UNIT, binding = 0;
+		int nextImageUnit = 0;
 
 		for (PackImages.Image spec : pack.images.images.values()) {
 			Format f = FORMATS.get(spec.internalFormat());
@@ -135,21 +131,22 @@ final class PackStorage implements AutoCloseable {
 				warnings.add("image." + spec.name() + ": out of image units (this GPU has " + maxImageUnits + ")");
 			} else {
 				image.unit = nextImageUnit++;
-				slots.put(spec.name(), new ExternalBindings.Slot(ExternalBindings.Kind.IMAGE, binding++, image.unit));
+				slots.put(spec.name(), new ExternalBindings.Slot(ExternalBindings.Kind.IMAGE, image.unit));
 			}
 			if (spec.sampler() != null) {
-				if (nextSamplerUnit >= FIRST_SAMPLER_UNIT + SAMPLER_UNITS) {
-					warnings.add("image." + spec.name() + ": too many image samplers");
+				int slot = units.slot(spec.sampler());
+				if (!PackSlots.fits(slot)) {
+					warnings.add("image." + spec.name() + ": out of texture units for its sampler");
 				} else {
-					image.samplerUnit = nextSamplerUnit++;
-					slots.put(spec.sampler(), new ExternalBindings.Slot(ExternalBindings.Kind.SAMPLER, binding++, image.samplerUnit));
+					image.samplerUnit = PackSlots.unit(slot);
+					slots.put(spec.sampler(), new ExternalBindings.Slot(ExternalBindings.Kind.SAMPLER, image.samplerUnit));
 				}
 			}
 			this.images.add(image);
 		}
 		for (PackImages.Buffer spec : pack.images.buffers.values()) this.buffers.add(new Buffer(spec));
 		for (Map.Entry<String, Integer> e : pack.bufferBlocks.entrySet()) {
-			if (e.getValue() >= 0) slots.put(e.getKey(), new ExternalBindings.Slot(ExternalBindings.Kind.BUFFER, binding++, e.getValue()));
+			if (e.getValue() >= 0) slots.put(e.getKey(), new ExternalBindings.Slot(ExternalBindings.Kind.BUFFER, e.getValue()));
 		}
 		ExternalBindings.set(slots);
 	}
@@ -238,25 +235,17 @@ final class PackStorage implements AutoCloseable {
 		this.clear(image);
 	}
 
-	/**
-	 * Binds an image's texture to the first sampler unit of ours to set it up. 2D textures go through the game's state
-	 * manager, which keeps track of what each unit has; other kinds it doesn't track.
-	 */
+	/** Binds an image's texture to our setup unit to set it up (the game's state manager keeps only units 0-11). */
 	private void bindForSetup(Image image) {
-		GlStateManager._activeTexture(GL13C.GL_TEXTURE0 + FIRST_SAMPLER_UNIT + SAMPLER_UNITS - 1);
-		if (image.target == GL11C.GL_TEXTURE_2D) GlStateManager._bindTexture(image.texture);
-		else GL11C.glBindTexture(image.target, image.texture);
+		Gl.bindUnit(Gl.SETUP_UNIT, image.target, image.texture);
 	}
 
 	private void unbindAfterSetup(Image image) {
-		if (image.target == GL11C.GL_TEXTURE_2D) GlStateManager._bindTexture(0);
-		else GL11C.glBindTexture(image.target, 0);
-		GlStateManager._activeTexture(GL13C.GL_TEXTURE0);
+		Gl.restoreActiveTexture();
 	}
 
 	private static void delete(Image image) {
-		if (image.target == GL11C.GL_TEXTURE_2D) GlStateManager._deleteTexture(image.texture);
-		else GL11C.glDeleteTextures(image.texture);
+		Gl.deleteTexture(image.texture);
 		image.texture = 0;
 	}
 
@@ -320,13 +309,11 @@ final class PackStorage implements AutoCloseable {
 					image.internalFormat);
 			}
 			if (image.samplerUnit >= 0) {
-				GlStateManager._activeTexture(GL13C.GL_TEXTURE0 + image.samplerUnit);
-				if (image.target == GL11C.GL_TEXTURE_2D) GlStateManager._bindTexture(image.texture);
-				else GL11C.glBindTexture(image.target, image.texture);
+				Gl.bindUnit(image.samplerUnit, image.target, image.texture);
 				GL33C.glBindSampler(image.samplerUnit, image.spec.integer() ? this.nearest : this.linear);
 			}
 		}
-		GlStateManager._activeTexture(GL13C.GL_TEXTURE0);
+		Gl.restoreActiveTexture();
 		for (Buffer buffer : this.buffers) {
 			if (buffer.id != 0) GL30C.glBindBufferBase(GL43C.GL_SHADER_STORAGE_BUFFER, buffer.spec.index(), buffer.id);
 		}

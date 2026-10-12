@@ -10,12 +10,36 @@ import java.util.List;
  * {@code config/afterburner.properties} ({@link Settings}). For testing, a JVM flag such as
  * {@code -Dafterburner.parallelWorldgen=false} wins over the file, and {@code -Dafterburner.disable=true} turns all off.
  * <p>
- * On the 1.21.1 branch the render optimizations that were built on 26.3's render pipeline (chunk batching, compact
- * vertices, occlusion and entity culling, visible-only animations and the like) are not included; Sodium and Iris cover
- * those on 1.21.1, and Afterburner leaves those parts to them when installed. The features below are the ones that work
- * on 1.21.1's renderer and server.
+ * On 1.21.1 the render optimizations are built on its own chunk renderer (one vertex buffer per section and layer). With
+ * Sodium installed, they all stay off and Sodium draws the chunks.
  */
 public enum Features {
+	/** Leaves out of each chunk draw the block faces that point away from the camera. Needs chunk batching. */
+	FACE_CULLING("faceCulling", "face culling", Group.RENDER, "sodium"),
+	/** Leaves out of water, glass and ice draws the flat faces that point away from the camera (the upside-down water top, for one). Needs chunk batching. */
+	TRANSLUCENT_CULLING("translucentCulling", "translucent face culling", Group.RENDER, "sodium"),
+	/** Leaves out the faces between leaf blocks deep inside trees, which see-through leaves otherwise all draw. */
+	LEAF_CULLING("leafCulling", "leaf culling", Group.RENDER, "sodium", "moreculling", "cullleaves", "cull-less-leaves"),
+	/** Draws the chunk sections of each 128 x 64 x 128 block region with one call instead of one call per section. */
+	CHUNK_BATCHING("chunkBatching", "batched chunk drawing", Group.RENDER, "sodium"),
+	/** Chunk vertices take 16 bytes instead of 32, so the graphics card has less to read for every block face. Needs chunk batching. */
+	COMPACT_VERTICES("compactVertices", "smaller chunk vertices", Group.RENDER, "sodium"),
+	/** Builds the chunk sections around the camera that are off screen while the builders have time, not only once looked at. */
+	OFFSCREEN_BUILDS("offscreenBuilds", "off-screen chunk building", Group.RENDER, "sodium"),
+	/** Skips drawing the chunk sections hidden behind nearer terrain (OpenGL 4.3 and up, or 3.3 with the same extensions). Needs chunk batching. */
+	OCCLUSION_CULLING("occlusionCulling", "occlusion culling", Group.RENDER, "sodium", "iris"),
+	/** Skips drawing the entities and block entities hidden behind terrain, using the occlusion culling test. Needs occlusion culling. */
+	ENTITY_CULLING("entityCulling", "entity culling", Group.RENDER, "sodium", "iris", "entityculling"),
+	/** Animated block textures (water, lava, fire...) are only drawn into the texture atlas while something on screen uses them. Needs chunk batching. */
+	VISIBLE_ANIMATIONS("visibleAnimations", "visible-only animations", Group.RENDER, "sodium"),
+	/** The biome blend of water, grass and leaf colours looks each spot's biome up once per chunk section build instead of up to 25 times. Same colours. */
+	FAST_BIOME_BLEND("fastBiomeBlend", "faster biome blending", Group.RENDER, "sodium"),
+	/** While a chunk section is built, smooth lighting keeps the light of every block in and around it, not only the last 100 looked up. Same lighting. */
+	SMOOTH_LIGHT_CACHE("smoothLightCache", "bigger smooth lighting cache", Group.RENDER, "sodium"),
+	/** The visibility update remembers how far each section corner's line to the camera gets, instead of walking it again for every neighbour. Same sections in view. */
+	FAST_VISIBILITY("fastVisibility", "faster visibility updates", Group.RENDER, "sodium"),
+	/** Particles only in chunk sections hidden behind terrain aren't drawn, and each keeps its light while it stays in the same block and nothing changes. */
+	FAST_PARTICLES("fastParticles", "faster particles", Group.RENDER, "sodium"),
 	/** While the game is paused or in the background, Java gives the memory it isn't using back to the system. */
 	MEMORY_TRIM("memoryTrim", "memory trim", Group.MEMORY),
 	/** Places trees, ores and structures on every CPU core instead of one, keeping chunks that touch apart. */
@@ -113,12 +137,20 @@ public enum Features {
 
 	/** The optimization this one is built on, which must be on too, or null. */
 	public Features needs() {
-		return null;
+		return switch (this) {
+			case ENTITY_CULLING -> OCCLUSION_CULLING;
+			case FACE_CULLING, COMPACT_VERTICES, OCCLUSION_CULLING, TRANSLUCENT_CULLING -> CHUNK_BATCHING;
+			default -> null;
+		};
 	}
 
-	/** On unless the settings file says off. */
+	/**
+	 * On unless the settings file says off. On phones and tablets ({@link Mobile}) occlusion culling starts off: its test
+	 * reads the depth of the solid terrain in the middle of the frame, which makes a tiled phone GPU write the whole screen
+	 * out and read it back.
+	 */
 	public boolean defaultOn() {
-		return true;
+		return !Mobile.ACTIVE || this != OCCLUSION_CULLING && this != ENTITY_CULLING;
 	}
 
 	/** Set by a JVM flag, which the settings file can't change. */
@@ -138,7 +170,7 @@ public enum Features {
 
 	/** Can be switched off and on again while playing (the code it needs stays in either way). */
 	public boolean live() {
-		return false;
+		return this == OCCLUSION_CULLING || this == ENTITY_CULLING;
 	}
 
 	/** Switches a {@link #live()} one now; one that isn't enabled stays off until a restart. */

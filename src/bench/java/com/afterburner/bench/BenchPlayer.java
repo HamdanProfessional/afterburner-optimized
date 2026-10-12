@@ -1,11 +1,11 @@
 package com.afterburner.bench;
 
 import com.mojang.authlib.GameProfile;
-import io.netty.channel.ChannelFutureListener;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.Connection;
+import net.minecraft.network.PacketSendListener;
 import net.minecraft.network.PacketListener;
 import net.minecraft.network.ProtocolInfo;
 import net.minecraft.network.protocol.Packet;
@@ -16,7 +16,6 @@ import net.minecraft.network.protocol.game.ClientboundChunkBatchFinishedPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundChunkBatchReceivedPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -54,10 +53,9 @@ public final class BenchPlayer {
 		GameProfile profile = new GameProfile(UUIDUtil.createOfflinePlayerUUID("Benchmark"), "Benchmark");
 		CommonListenerCookie cookie = CommonListenerCookie.createInitial(profile, false);
 		ServerPlayer player = new ServerPlayer(server, level, profile, cookie.clientInformation());
-		player.snapTo(pos, 0.0F, 0.0F);
+		player.moveTo(pos.x, pos.y, pos.z, 0.0F, 0.0F);
 		BotConnection connection = new BotConnection(player);
 		server.getPlayerList().placeNewPlayer(connection, player, cookie);
-		player.connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
 		BOTS.add(connection);
 		return player;
 	}
@@ -74,7 +72,7 @@ public final class BenchPlayer {
 		}
 
 		@Override
-		public void send(Packet<?> packet, @Nullable ChannelFutureListener listener, boolean flush) {
+		public void send(Packet<?> packet, @Nullable PacketSendListener listener, boolean flush) {
 			if (packet instanceof ClientboundKeepAlivePacket || packet instanceof ClientboundChunkBatchFinishedPacket
 					|| packet instanceof ClientboundPlayerPositionPacket) {
 				synchronized (toAnswer) {
@@ -97,8 +95,7 @@ public final class BenchPlayer {
 				} else if (packet instanceof ClientboundChunkBatchFinishedPacket) {
 					player.connection.handleChunkBatchReceived(new ServerboundChunkBatchReceivedPacket(64.0F));
 				} else if (packet instanceof ClientboundPlayerPositionPacket teleport) {
-					player.connection.handleAcceptTeleportPacket(new ServerboundAcceptTeleportationPacket(teleport.id(),
-							player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot()));
+					player.connection.handleAcceptTeleportPacket(new ServerboundAcceptTeleportationPacket(teleport.getId()));
 				}
 			}
 			player.connection.tick();

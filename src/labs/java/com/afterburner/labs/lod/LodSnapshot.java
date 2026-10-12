@@ -40,15 +40,15 @@ final class LodSnapshot {
 	@SuppressWarnings("unchecked")
 	LodSnapshot(LodWorld world, ClientLevel level, LevelChunk chunk) {
 		this.world = world;
-		this.cx = chunk.getPos().x();
-		this.cz = chunk.getPos().z();
+		this.cx = chunk.getPos().x;
+		this.cz = chunk.getPos().z;
 		LevelChunkSection[] sections = chunk.getSections();
 		int n = sections.length;
 		blocks = new PalettedContainer[n];
 		sky = new DataLayer[n];
 		blockLight = new DataLayer[n];
 		LevelLightEngine light = level.getLightEngine();
-		int minSection = chunk.getMinSectionY();
+		int minSection = chunk.getMinSection();
 		long size = 256;
 		for (int i = 0; i < n; i++) {
 			LevelChunkSection section = sections[i];
@@ -80,7 +80,7 @@ final class LodSnapshot {
 			for (int qx = 0; qx < 4; qx++) {
 				int y = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, qx * 4 + 2, qz * 4 + 2);
 				Holder<Biome> biome = chunk.getNoiseBiome(qx, y >> 2, qz);
-				biomes[qz * 4 + qx] = biome.unwrapKey().map(k -> k.identifier()).orElse(PLAINS);
+				biomes[qz * 4 + qx] = biome.unwrapKey().map(k -> k.location()).orElse(PLAINS);
 			}
 		}
 		bytes = size;

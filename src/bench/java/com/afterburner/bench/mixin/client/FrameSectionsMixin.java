@@ -15,6 +15,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public class FrameSectionsMixin {
 	@Inject(method = "constructProfiler", at = @At("RETURN"), cancellable = true)
 	private void afterburner$frameSections(boolean shouldCollectFrameProfile, @Nullable SingleTickProfiler tickProfiler, CallbackInfoReturnable<ProfilerFiller> cir) {
-		if (FrameSections.measuring) cir.setReturnValue(ProfilerFiller.combine(cir.getReturnValue(), FrameSections.INSTANCE));
+		if (FrameSections.measuring) cir.setReturnValue(ProfilerFiller.tee(cir.getReturnValue(), FrameSections.INSTANCE));
 	}
 }

@@ -9,32 +9,30 @@ import it.unimi.dsi.fastutil.longs.LongArrays;
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
-import net.minecraft.util.context.ContextMap;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.biome.BiomeResolver;
+import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Beardifier;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.levelgen.Aquifer;
+import net.minecraft.world.level.levelgen.DensityFunction;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+import net.minecraft.world.level.levelgen.NoiseChunk;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.SurfaceRules;
 import net.minecraft.world.level.levelgen.WorldGenerationContext;
-import net.minecraft.world.level.levelgen.densityfunction.DensityBuffer;
-import net.minecraft.world.level.levelgen.densityfunction.DensityBufferPool;
-import net.minecraft.world.level.levelgen.densityfunction.DensityFunction;
-import net.minecraft.world.level.levelgen.densityfunction.DensitySampler;
-import net.minecraft.world.level.levelgen.densityfunction.DensitySamplerSet;
-import net.minecraft.world.level.levelgen.densityfunction.DensityVolume;
-import net.minecraft.world.level.levelgen.densityfunction.DfRewriteRule;
-import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
-import net.minecraft.world.level.levelgen.densityfunction.ScopedDensityBuffer;
-import net.minecraft.world.level.levelgen.densityfunction.op.InterpolatedFunction;
-import net.minecraft.world.level.levelgen.material.MaterialRuleContext;
-import net.minecraft.world.level.levelgen.material.rule.RuleEvaluator;
+import net.minecraft.world.level.levelgen.blending.Blender;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -49,14 +47,14 @@ import java.util.List;
  * It's for the far terrain where no chunk was ever seen, so it comes in the far terrain's own form: 16 x 16 columns of
  * voxels 2^level blocks wide and tall.
  * <p>
- * The ground comes from the generator's own final density, so it's where the real chunks' ground will be: at levels 0
- * and 1 exactly (sampled block by block, the same way the generator does), further out at the corners of its noise
- * cells, from which the height between them is worked out. Up to level {@link #TREE_LEVELS} it's shaped to the buildings
+ * The ground comes from the generator's own final density ({@link FarDensity}), so it's where the real chunks' ground
+ * will be: at levels 0 and 1 exactly (sampled block by block, the same way the generator does), further out at the
+ * corners of its noise cells, from which the height between them is worked out. Up to level {@link #TREE_LEVELS} it's shaped to the buildings
  * as the game shapes it ({@link FarStructures#shaping}). Any thread, one {@link Sampler} per thread.
  */
 public final class FarLand {
 	/** Bumped when what's made changes, so land made by an older version is made again: 1 to 127. */
-	public static final int VERSION = 4;
+	public static final int VERSION = 5;
 	/** Palette places with a fixed meaning: air, and solid ground nothing sees. */
 	public static final int AIR = 0, HIDDEN = 1;
 	/** Surface rules are asked this many blocks down a cliff at most; below that it's the plain ground block. */
@@ -94,13 +92,12 @@ public final class FarLand {
 	private final RandomState random;
 	private final WorldGenerationContext genContext;
 	private final BiomeSource biomeSource;
-	private final DensityFunction prelimFunction;
 	/**
-	 * Whether the generator has no preliminary surface (a constant, as the floating islands' one): searches start at the
-	 * top of the world and air under the ground is looked for everywhere.
+	 * Whether the generator has no preliminary surface (what it's found from is a constant, as the floating islands'):
+	 * searches start at the top of the world and air under the ground is looked for everywhere.
 	 */
 	private final boolean noSurface;
-	private final DensitySampler fullDensity, coarseDensity, coarsePrelim;
+	private final Registry<Biome> biomeRegistry;
 	/** The lowest block the land is made from and the top (exclusive). */
 	public final int minY, topY;
 	private final int seaLevel;
@@ -117,13 +114,11 @@ public final class FarLand {
 		random = level.getChunkSource().randomState();
 		genContext = new WorldGenerationContext(generator, level);
 		biomeSource = generator.getBiomeSource();
-		prelimFunction = settings.noiseRouter().chunkSurfaceLevel();
-		noSurface = prelimFunction.domainAxes() == DensityFunction.NO_AXES;
-		fullDensity = random.getSampler(settings.noiseRouter().finalDensity());
-		coarseDensity = random.getSampler(STRIP.rewrite(settings.noiseRouter().finalDensity()));
-		coarsePrelim = random.getSampler(STRIP.rewrite(prelimFunction));
-		minY = Math.max(level.getMinY(), settings.noiseSettings().minY());
-		topY = Math.min(level.getMinY() + level.getHeight(), settings.noiseSettings().minY() + settings.noiseSettings().height());
+		DensityFunction prelim = random.router().initialDensityWithoutJaggedness();
+		noSurface = prelim.minValue() == prelim.maxValue();
+		biomeRegistry = level.registryAccess().registryOrThrow(Registries.BIOME);
+		minY = Math.max(level.getMinBuildHeight(), settings.noiseSettings().minY());
+		topY = Math.min(level.getMinBuildHeight() + level.getHeight(), settings.noiseSettings().minY() + settings.noiseSettings().height());
 		seaLevel = settings.seaLevel();
 		skyLight = level.dimensionType().hasSkyLight();
 		defaultBlock = settings.defaultBlock();
@@ -146,41 +141,8 @@ public final class FarLand {
 				&& level.dimensionType().hasSkyLight();
 	}
 
-	/**
-	 * The generator's noise is made of cells: what's between their corners is interpolated. Sampled further apart than a
-	 * cell, the interpolation would need every block in between, so out there it's left out: what's left is exact at the
-	 * corners, and close to the real thing between them.
-	 */
-	private static final DfRewriteRule STRIP = new DfRewriteRule() {
-		@Override
-		public DensityFunction rewrite(DensityFunction function) {
-			function = DfRewriteRule.INLINE_REFERENCE.rewrite(function);
-			if (function instanceof InterpolatedFunction interpolated) return rewrite(interpolated.input());
-			return function.rewriteChildren(this);
-		}
-	};
-
 	public Sampler sampler() {
 		return new Sampler();
-	}
-
-	/** Stands in for the game's shaping of the ground to buildings (asked for by the final density): the sheet's. */
-	private static final class SheetBeard extends Beardifier {
-		Beardifier current = Beardifier.EMPTY;
-
-		SheetBeard() {
-			super(List.of(), List.of(), null);
-		}
-
-		@Override
-		public void sampleVolume(SamplerContext context, DensityBuffer out, DensityVolume volume) {
-			current.sampleVolume(context, out, volume);
-		}
-
-		@Override
-		public float sampleValue(SamplerContext context, int x, int y, int z) {
-			return current.sampleValue(context, x, y, z);
-		}
 	}
 
 	/** The buildings, if the world has any (and they're on). */
@@ -225,20 +187,21 @@ public final class FarLand {
 
 	/** One thread's tools: its own noise caches and surface rules. */
 	public final class Sampler implements FarTrees.Ground {
-		private final SamplerContext context;
-		/** The ground's shaping to the buildings around the sheet being made (the generator's final density asks for it). */
-		private final SheetBeard beard = new SheetBeard();
-		/** The heights that shaping can change the ground between (none when lo > hi). */
+		private final FarDensity density;
+		/** The heights the shaping to the buildings around the sheet can change the ground between (none when lo > hi). */
 		private int shapeLo, shapeHi;
-		private final DensityBufferPool pool = new DensityBufferPool(20);
-		private final DensitySampler.Bound full, coarse, prelim;
-		private final BiomeResolver biomes;
-		private final MaterialRuleContext rules;
-		private final RuleEvaluator rule;
+		private final SurfaceRules.Context rules;
+		private final SurfaceRules.SurfaceRule rule;
+		/** The chunk of the column the surface rules are on ({@link #rulesAt}): its first block. */
+		private int rulesX, rulesZ;
 		private final Long2ObjectOpenHashMap<Holder<Biome>> biomeMemo = new Long2ObjectOpenHashMap<>();
+		private final Long2ObjectOpenHashMap<Holder<Biome>> blockBiomeMemo = new Long2ObjectOpenHashMap<>();
+		private final BiomeManager zoom = new BiomeManager(this::noiseBiome, BiomeManager.obfuscateSeed(level.getSeed()));
 		private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		/** The preliminary surface on the generator's 16-block grid over the sheet, {@link #grid} points a side. */
 		private float[] prelimGrid = new float[0];
+		/** The same as the generator has it (the surface rules ask for it): {@link Integer#MAX_VALUE} where there's none. */
+		private int[] prelimRaw = new int[0];
 		private int grid, gridX, gridZ;
 		private final int[] tops = new int[256], voxels = new int[256];
 		/**
@@ -264,7 +227,7 @@ public final class FarLand {
 		private final FarTrees.@Nullable Grower grower = trees == null ? null : trees.grower();
 		/** By chunk and level ({@link #treeKey}), most recent first. */
 		private final Long2ObjectLinkedOpenHashMap<Kept> kept = new Long2ObjectLinkedOpenHashMap<>();
-		/** The sheet the trees grow on: its first column's block and a voxel's size. */
+		/** The sheet being made (and the trees grow on): its first column's block and a voxel's size. */
 		private int treeX0, treeZ0, treeS = 1;
 		private @Nullable Sheet treeSheet;
 		/** While buildings are put down ({@link #building}): the ground's height past the sheet, by column, as worked out. */
@@ -283,29 +246,26 @@ public final class FarLand {
 		}
 
 		private Sampler() {
-			context = SamplerContext.builder().setUserFields(ContextMap.builder().set(Beardifier.CONTEXT_KEY, beard).build()).useBufferArena(pool)
-					.enableCaches().build();
-			full = fullDensity.bind(context);
-			coarse = coarseDensity.bind(context);
-			prelim = coarsePrelim.bind(context);
-			DensitySamplerSet base = random.samplersWithContext(context);
-			biomes = biomeSource.createResolver(random.createClimateSampler(context));
-			// The surface rules ask for the preliminary surface where they are: it's on hand for the whole sheet.
-			DensitySampler.Bound known = new DensitySampler() {
+			density = new FarDensity(random, settings);
+			// The surface rules ask the chunk how steep the ground is, and the generator's noise chunk where its preliminary
+			// surface is: both come from the sheet being made.
+			ChunkAccess slopes = new ProtoChunk(ChunkPos.ZERO, UpgradeData.EMPTY, LevelHeightAccessor.create(0, 16), biomeRegistry, null) {
 				@Override
-				public void sampleVolume(SamplerContext c, DensityBuffer out, DensityVolume volume) {
-					DensitySampler.sampleVolumeNaive(c, out, volume, this);
+				public int getHeight(Heightmap.Types type, int x, int z) {
+					return slopeHeight(x, z);
 				}
-
+			};
+			BlockState fluid = settings.defaultFluid();
+			NoiseChunk surface = new NoiseChunk(1, random, 0, 0, settings.noiseSettings(), FarStructures.Shaping.NONE.beardifier(), settings,
+					(x, y, z) -> new Aquifer.FluidStatus(seaLevel, fluid), Blender.empty()) {
 				@Override
-				public float sampleValue(SamplerContext c, int x, int y, int z) {
-					return prelimAt(x, z);
+				public int preliminarySurfaceLevel(int x, int z) {
+					return surfaceLevel(x, z);
 				}
-			}.bind(context);
-			DensitySamplerSet set = function -> function == prelimFunction ? known : base.get(function);
-			rules = new MaterialRuleContext(random.surfaceSystem(), random, new DensityVolume(1, 1, 1, 0, 0, 0), set,
-					p -> biome(p.getX(), p.getY(), p.getZ()), genContext, null);
-			rule = settings.materialRule().value().compile(rules);
+			};
+			rules = new SurfaceRules.Context(random.surfaceSystem(), random, slopes, surface, p -> biome(p.getX(), p.getY(), p.getZ()), biomeRegistry,
+					genContext);
+			rule = settings.surfaceRule().apply(rules);
 		}
 
 		/** The sheet at {@code level} whose first column is at block x0, z0 (multiples of 16 << level). */
@@ -313,13 +273,17 @@ public final class FarLand {
 			Sheet sheet = new Sheet();
 			long t0 = System.nanoTime();
 			int s = 1 << level;
+			treeX0 = x0;
+			treeZ0 = z0;
+			treeS = s;
 			FarStructures structures = structures();
 			FarStructures.Shaping shaping = structures != null && FarStructures.BEARD && level <= TREE_LEVELS
 					? structures.shaping(x0 - 16, z0 - 16, x0 + (16 << level) + 15, z0 + (16 << level) + 15) : FarStructures.Shaping.NONE;
-			beard.current = shaping.beardifier();
+			density.shapeTo(shaping.lo() <= shaping.hi() ? shaping.beardifier() : null);
 			shapeLo = shaping.lo();
 			shapeHi = shaping.hi();
 			biomeMemo.clear();
+			blockBiomeMemo.clear();
 			readPrelim(x0, z0, 16 << level);
 			for (int c = 0; c < 256; c++) prelims[c] = prelimAt(x0 + (c & 15) * s, z0 + (c >> 4) * s);
 			// The shaping to buildings is too sharp for samples 8 blocks apart: where there's some, block by block.
@@ -373,7 +337,7 @@ public final class FarLand {
 						// Ground over air (floating islands, an arch): the pieces from the bottom up.
 						Holder<Biome> biome = biome(bx, top - 1, bz);
 						sheet.biomes[c] = biome;
-						rules.updateXZ(bx, bz, gradient(x, z, 1, s), gradient(x, z, 16, s));
+						rulesAt(bx, bz);
 						int k = c * MAX_SEG, end = 0, under = Integer.MIN_VALUE;
 						for (int i = segCount[c] - 1; i >= 0; i--) {
 							int t = segTops[k + i], b = segBottoms[k + i];
@@ -411,7 +375,7 @@ public final class FarLand {
 						Holder<Biome> biome = biome(bx, seaLevel - 1, bz);
 						sheet.biomes[c] = biome;
 						if (n > 0) add(HIDDEN << 8, n);
-						boolean ice = water.is(Blocks.WATER) && biome.value().coldEnoughToSnow(pos.set(bx, seaLevel - 1, bz), seaLevel);
+						boolean ice = water.is(Blocks.WATER) && biome.value().coldEnoughToSnow(pos.set(bx, seaLevel - 1, bz));
 						if (ice) {
 							if (waterTop - 1 > n) add(sheet.id(water) << 8, waterTop - 1);
 							add(sheet.id(Blocks.ICE.defaultBlockState()) << 8, waterTop);
@@ -426,7 +390,7 @@ public final class FarLand {
 						Holder<Biome> biome = biome(bx, top - 1, bz);
 						sheet.biomes[c] = biome;
 						int low = low(c, x, z, n);
-						rules.updateXZ(bx, bz, gradient(x, z, 1, s), gradient(x, z, 16, s));
+						rulesAt(bx, bz);
 						materials(bx, bz, s, top, n, low, minY, top < seaLevel ? seaLevel : Integer.MIN_VALUE);
 						topStates(c, n, low);
 						// Snow where the game would put it on top: it counts toward the height, as a chunk's does.
@@ -445,7 +409,6 @@ public final class FarLand {
 				plantTrees(sheet, level, x0, z0, s);
 				treeNanos += System.nanoTime() - t2;
 			}
-			pool.garbageCollect();
 			return sheet;
 		}
 
@@ -563,7 +526,7 @@ public final class FarLand {
 				int x = unpackX(column), z = unpackZ(column), y = e.getIntValue() + 1;
 				int c = Math.min(z / treeS, 15) * 16 + Math.min(x / treeS, 15);
 				Holder<Biome> biome = sheet0Biome(c);
-				if (biome != null && minY + y < topY && biome.value().coldEnoughToSnow(pos.set(x0 + x, minY + y, z0 + z), seaLevel)) {
+				if (biome != null && minY + y < topY && biome.value().coldEnoughToSnow(pos.set(x0 + x, minY + y, z0 + z))) {
 					blocks.put(pack(x, y, z), snow);
 				}
 			}
@@ -572,7 +535,7 @@ public final class FarLand {
 		/** Whether snow would fall on voxel {@code v} of column {@code c} (level 0). */
 		private boolean snowsAt(int c, int v) {
 			Holder<Biome> biome = sheet0Biome(c);
-			return biome != null && biome.value().coldEnoughToSnow(pos.set(treeX0 + (c & 15) * treeS, minY + v * treeS, treeZ0 + (c >> 4) * treeS), seaLevel);
+			return biome != null && biome.value().coldEnoughToSnow(pos.set(treeX0 + (c & 15) * treeS, minY + v * treeS, treeZ0 + (c >> 4) * treeS));
 		}
 
 		private @Nullable Holder<Biome> sheet0Biome(int c) {
@@ -671,8 +634,7 @@ public final class FarLand {
 
 		@Override
 		public int top(int x, int z) {
-			int s = treeS;
-			if (building && (x < treeX0 || z < treeZ0 || x >= treeX0 + 16 * s || z >= treeZ0 + 16 * s)) {
+			if (building && (x < treeX0 || z < treeZ0 || x >= treeX0 + 16 * treeS || z >= treeZ0 + 16 * treeS)) {
 				long column = BlockPos.asLong(x, 0, z);
 				int top = pastSheet.get(column);
 				if (top == Integer.MIN_VALUE) {
@@ -681,6 +643,12 @@ public final class FarLand {
 				}
 				return top;
 			}
+			return groundAt(x, z);
+		}
+
+		/** Where the sheet's ground ends at block x, z: between columns worked out from those around, past its edge its edge's. */
+		private int groundAt(int x, int z) {
+			int s = treeS;
 			if (s == 1) return tops[Mth.clamp(z - treeZ0, 0, 15) * 16 + Mth.clamp(x - treeX0, 0, 15)];
 			float fx = Mth.clamp((x - treeX0) / (float) s, 0.0F, 15.0F), fz = Mth.clamp((z - treeZ0) / (float) s, 0.0F, 15.0F);
 			int i = Math.min((int) fx, 14), j = Math.min((int) fz, 14);
@@ -707,7 +675,7 @@ public final class FarLand {
 			int top = tops[c], n = voxels[c];
 			if (top >= seaLevel || top <= minY || seaLevel - top > 5 || n <= 0) return defaultBlock;
 			int cx = c & 15, cz = c >> 4, bx = treeX0 + cx * treeS, bz = treeZ0 + cz * treeS;
-			rules.updateXZ(bx, bz, gradient(cx, cz, 1, treeS), gradient(cx, cz, 16, treeS));
+			rulesAt(bx, bz);
 			materials(bx, bz, treeS, top, n, n - 1, minY, seaLevel);
 			topStates[c] = materials[0];
 			underStates[c] = defaultBlock;
@@ -733,7 +701,7 @@ public final class FarLand {
 			long key = BlockPos.asLong(quartX, qy, quartZ);
 			Holder<Biome> biome = biomeMemo.get(key);
 			if (biome == null) {
-				biome = biomes.getNoiseBiome(quartX, qy, quartZ);
+				biome = biomeSource.getNoiseBiome(quartX, qy, quartZ, density.climate);
 				biomeMemo.put(key, biome);
 			}
 			return biome;
@@ -752,15 +720,25 @@ public final class FarLand {
 			return Math.max(low, Math.max(0, n - materials.length));
 		}
 
-		/** The ground's slope across a column, along x ({@code step} 1) or z (16), in blocks a voxel. */
-		private int gradient(int x, int z, int step, int s) {
-			int i = step == 1 ? x : z, row = step == 1 ? z * 16 : x;
-			return (tops[row + Math.min(i + 1, 15) * step] - tops[row + Math.max(i - 1, 0) * step]) / s;
+		/** The surface rules on the column at block bx, bz from here on. */
+		private void rulesAt(int bx, int bz) {
+			rulesX = bx & ~15;
+			rulesZ = bz & ~15;
+			rules.updateXZ(bx, bz);
+		}
+
+		/**
+		 * For the surface rules' steep ground: the height of the top block at x, z in the chunk of the column they're on (as
+		 * the generator's heightmap has it then, the sea counted), from the sheet's ground.
+		 */
+		private int slopeHeight(int x, int z) {
+			int top = groundAt(rulesX + x, rulesZ + z);
+			return (top < seaLevel && !settings.defaultFluid().isAir() ? seaLevel : top) - 1;
 		}
 
 		/** Whether the game would put snow on ground whose top is {@code top}, top voxel {@code n - 1} in {@link #materials}. */
 		private boolean snowy(Holder<Biome> biome, int bx, int bz, int top, int n, int low) {
-			return top >= seaLevel && top < topY && biome.value().coldEnoughToSnow(pos.set(bx, top, bz), seaLevel)
+			return top >= seaLevel && top < topY && biome.value().coldEnoughToSnow(pos.set(bx, top, bz))
 					&& snowCanLie(materials[n - 1 - low]);
 		}
 
@@ -774,7 +752,7 @@ public final class FarLand {
 				int depth = top - y, below = y - base + 1;
 				BlockState state = null;
 				if (depth <= RULE_DEPTH || base > minY && below <= 8) {
-					rules.updateY(depth, below, waterHeight, y);
+					rules.updateY(depth, below, waterHeight, bx, y, bz);
 					state = rule.tryApply(bx, y, bz);
 				}
 				materials[v - low] = state != null ? state : defaultBlock;
@@ -810,17 +788,27 @@ public final class FarLand {
 			grid = (span >> 4) + 1;
 			gridX = x0;
 			gridZ = z0;
-			if (prelimGrid.length != grid * grid) prelimGrid = new float[grid * grid];
-			DensityVolume volume = new DensityVolume(grid, 1, grid, x0, 0, z0, 16, 1, 16);
-			try (ScopedDensityBuffer buffer = prelim.sampleVolume(volume)) {
-				for (int i = 0; i < prelimGrid.length; i++) prelimGrid[i] = buffer.get(i);
+			if (prelimGrid.length != grid * grid) {
+				prelimGrid = new float[grid * grid];
+				prelimRaw = new int[grid * grid];
+			}
+			for (int i = 0; i < prelimGrid.length; i++) {
+				prelimRaw[i] = density.preliminarySurface(x0 + i % grid * 16, z0 + i / grid * 16);
+				prelimGrid[i] = Mth.clamp(prelimRaw[i], minY, topY);
 			}
 		}
 
-		/** The preliminary surface the way the generator works it out: between the grid's points, interpolated. */
+		/** The generator's preliminary surface at block x, z, as it has it (the surface rules ask on the sheet's grid). */
+		private int surfaceLevel(int x, int z) {
+			int rx = x - gridX, rz = z - gridZ;
+			if ((rx & 15) == 0 && (rz & 15) == 0 && rx >= 0 && rz >= 0 && rx >> 4 < grid && rz >> 4 < grid) return prelimRaw[(rz >> 4) * grid + (rx >> 4)];
+			return density.preliminarySurface(x, z);
+		}
+
+		/** The preliminary surface the way the surface rules work it out: between the grid's points, interpolated. */
 		private float prelimAt(int x, int z) {
 			int rx = x - gridX, rz = z - gridZ, span = (grid - 1) * 16;
-			if (rx < 0 || rz < 0 || rx > span || rz > span) return random.getSampler(prelimFunction).sampleValue(context, x, 0, z);
+			if (rx < 0 || rz < 0 || rx > span || rz > span) return Mth.clamp(density.preliminarySurface(x, z), minY, topY);
 			int gx = Math.min(rx >> 4, grid - 2), gz = Math.min(rz >> 4, grid - 2);
 			float fx = (rx - gx * 16) / 16.0F, fz = (rz - gz * 16) / 16.0F;
 			float a = Mth.lerp(fx, prelimGrid[gz * grid + gx], prelimGrid[gz * grid + gx + 1]);
@@ -833,23 +821,29 @@ public final class FarLand {
 		 * Bit 1 of the answer: some column is solid at the top (look higher); bit 2: some has no ground (look lower).
 		 */
 		private int groundExact(int x0, int z0, int s, int lo, int hi) {
-			int h = hi - lo, found = 0;
-			DensityVolume volume = new DensityVolume(16, h, 16, x0, lo, z0, s, 1, s);
-			samples += 256L * h;
-			try (ScopedDensityBuffer buffer = full.sampleVolume(volume)) {
-				for (int c = 0; c < 256; c++) {
-					int base = c * h, y = h - 1;
-					while (y >= 0 && buffer.get(base + y) <= 0.0F) y--;
-					if (y == h - 1) found |= 1;
-					if (y < 0) {
-						found |= 2;
-						tops[c] = lo == minY ? minY : lo;
-					} else {
-						tops[c] = lo + y + 1;
-					}
+			int found = 0;
+			for (int c = 0; c < 256; c++) {
+				int y = highestSolid(x0 + (c & 15) * s, z0 + (c >> 4) * s, lo, hi);
+				if (y == hi - 1) found |= 1;
+				if (y < lo) {
+					found |= 2;
+					tops[c] = lo == minY ? minY : lo;
+				} else {
+					tops[c] = y + 1;
 				}
 			}
 			return found;
+		}
+
+		/** The highest block from {@code lo} to {@code hi} (exclusive) that's solid, block by block from the top; lo - 1 if none. */
+		private int highestSolid(int bx, int bz, int lo, int hi) {
+			int y = hi - 1;
+			while (y >= lo) {
+				samples++;
+				if (density.exact(bx, y, bz) > 0.0) break;
+				y--;
+			}
+			return y;
 		}
 
 		/**
@@ -874,18 +868,18 @@ public final class FarLand {
 		/** The ground's top in one column, found 8 blocks at a time from the guess ({@link #groundSearch}). */
 		private int searchColumn(int bx, int bz, int guess) {
 			int y = Mth.clamp(guess & ~7, minY, topY);
-			float d = coarse.sampleValue(bx, y, bz);
+			float d = coarse(bx, y, bz);
 			samples++;
 			if (d > 0.0F) {
 				while (true) {
 					int up = y + 8;
 					if (up > topY) return Math.min(topY, y + 1);
-					float e = coarse.sampleValue(bx, up, bz);
+					float e = coarse(bx, up, bz);
 					samples++;
 					if (e <= 0.0F) {
 						// Air, but over a ledge there may be more ground: one more sample above to be sure.
 						if (up + 8 <= topY) {
-							float f = coarse.sampleValue(bx, up + 8, bz);
+							float f = coarse(bx, up + 8, bz);
 							samples++;
 							if (f > 0.0F) {
 								y = up + 8;
@@ -902,7 +896,7 @@ public final class FarLand {
 			while (true) {
 				int down = y - 8;
 				if (down < minY) return minY;
-				float e = coarse.sampleValue(bx, down, bz);
+				float e = coarse(bx, down, bz);
 				samples++;
 				if (e > 0.0F) return Math.min(topY, crossing(down, e, d));
 				y = down;
@@ -956,27 +950,22 @@ public final class FarLand {
 		 * range was solid).
 		 */
 		private int exact(int x0, int z0, int s, int lo, int hi, int mode) {
-			int h = hi - lo, left = 0;
-			DensityVolume volume = new DensityVolume(16, h, 16, x0, lo, z0, s, 1, s);
-			samples += 256L * h;
-			try (ScopedDensityBuffer buffer = full.sampleVolume(volume)) {
-				for (int c = 0; c < 256; c++) {
-					if (mode != FIRST && (need[c] & mode) == 0) continue;
-					int base = c * h, y = h - 1;
-					while (y >= 0 && buffer.get(base + y) <= 0.0F) y--;
-					int flags = 0;
-					if (y == h - 1 && mode != DOWN) {
-						tops[c] = hi;
-						flags = UP;
-					} else if (y >= 0) {
-						tops[c] = lo + y + 1;
-					} else {
-						tops[c] = lo;
-						if (mode != UP && lo > minY) flags = DOWN;
-					}
-					need[c] = flags;
-					left |= flags;
+			int left = 0;
+			for (int c = 0; c < 256; c++) {
+				if (mode != FIRST && (need[c] & mode) == 0) continue;
+				int y = highestSolid(x0 + (c & 15) * s, z0 + (c >> 4) * s, lo, hi);
+				int flags = 0;
+				if (y == hi - 1 && mode != DOWN) {
+					tops[c] = hi;
+					flags = UP;
+				} else if (y >= lo) {
+					tops[c] = y + 1;
+				} else {
+					tops[c] = lo;
+					if (mode != UP && lo > minY) flags = DOWN;
 				}
+				need[c] = flags;
+				left |= flags;
 			}
 			return left;
 		}
@@ -1045,41 +1034,50 @@ public final class FarLand {
 		private float sample(int bx, int y, int bz) {
 			samples++;
 			gapSamples++;
-			return coarse.sampleValue(bx, y, bz);
+			return coarse(bx, y, bz);
 		}
 
 		/** Levels 2 and up: the density every 8 blocks, the ground's top worked out between the two around it. */
 		private int groundCoarse(int x0, int z0, int s, int lo, int hi) {
 			int n = (hi - lo) / 8 + 1, found = 0;
-			DensityVolume volume = new DensityVolume(16, n, 16, x0, lo, z0, s, 8, s);
-			samples += 256L * n;
-			try (ScopedDensityBuffer buffer = coarse.sampleVolume(volume)) {
-				for (int c = 0; c < 256; c++) {
-					int base = c * n, k = n - 1;
-					while (k >= 0 && buffer.get(base + k) <= 0.0F) k--;
-					if (k == n - 1) found |= 1;
-					if (k < 0) {
-						found |= 2;
-						tops[c] = lo == minY ? minY : lo;
-					} else if (k == n - 1) {
-						tops[c] = Math.min(topY, lo + 8 * k + 1);
-					} else {
-						float a = buffer.get(base + k), b = buffer.get(base + k + 1);
-						int y = lo + 8 * k;
-						tops[c] = Mth.clamp(Mth.ceil(y + 8.0F * a / (a - b)), y + 1, y + 8);
+			for (int c = 0; c < 256; c++) {
+				int bx = x0 + (c & 15) * s, bz = z0 + (c >> 4) * s, k = n - 1;
+				// From the top down to the first solid sample, keeping the one above it.
+				float a = coarse(bx, lo + 8 * k, bz), b = 0.0F;
+				samples++;
+				while (a <= 0.0F && k >= 0) {
+					b = a;
+					if (--k >= 0) {
+						a = coarse(bx, lo + 8 * k, bz);
+						samples++;
 					}
+				}
+				if (k == n - 1) found |= 1;
+				if (k < 0) {
+					found |= 2;
+					tops[c] = lo == minY ? minY : lo;
+				} else if (k == n - 1) {
+					tops[c] = Math.min(topY, lo + 8 * k + 1);
+				} else {
+					int y = lo + 8 * k;
+					tops[c] = Mth.clamp(Mth.ceil(y + 8.0F * a / (a - b)), y + 1, y + 8);
 				}
 			}
 			return found;
 		}
 
-		/** The biome the generator picks there (without the blur between biomes a chunk gets). */
+		/** The final density at a block, its cells' interpolation left out (exact at their corners). */
+		private float coarse(int bx, int y, int bz) {
+			return (float) density.coarse(bx, y, bz);
+		}
+
+		/** The biome a chunk gets there: the generator's, with the seeded blur between biomes the game's surface rules see. */
 		private Holder<Biome> biome(int x, int y, int z) {
-			long key = BlockPos.asLong(x >> 2, y >> 2, z >> 2);
-			Holder<Biome> biome = biomeMemo.get(key);
+			long key = BlockPos.asLong(x, y, z);
+			Holder<Biome> biome = blockBiomeMemo.get(key);
 			if (biome == null) {
-				biome = biomes.getNoiseBiome(x >> 2, y >> 2, z >> 2);
-				biomeMemo.put(key, biome);
+				biome = zoom.getBiome(new BlockPos(x, y, z));
+				blockBiomeMemo.put(key, biome);
 			}
 			return biome;
 		}

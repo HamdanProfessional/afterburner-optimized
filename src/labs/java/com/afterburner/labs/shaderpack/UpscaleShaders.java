@@ -14,13 +14,12 @@ public final class UpscaleShaders {
 	}
 
 	private static final String HEADER = """
-		#version 330
-		#extension GL_ARB_separate_shader_objects : require
+		#version 330 core
 		""";
 
 	public static final String VERTEX = HEADER + """
 		void main() {
-			vec2 uv = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+			vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
 			gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
 		}
 		""";

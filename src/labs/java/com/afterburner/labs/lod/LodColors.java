@@ -6,34 +6,33 @@ import com.mojang.blaze3d.platform.NativeImage;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.color.block.BlockColors;
-import net.minecraft.client.color.block.BlockTintSource;
-import net.minecraft.client.renderer.block.BlockAndTintGetter;
-import net.minecraft.client.renderer.block.BlockStateModelSet;
-import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+import net.minecraft.client.renderer.block.BlockModelShaper;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
-import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.data.AtlasIds;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.level.CardinalLighting;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LightChunk;
+import net.minecraft.world.level.chunk.LightChunkGetter;
 import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 import org.jspecify.annotations.Nullable;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.IdentityHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -43,25 +42,26 @@ import java.util.Map;
  */
 final class LodColors {
 	/** What the render thread hands the worker: the models, and per block atlas sprite its average color (alpha: coverage). */
-	record Textures(BlockStateModelSet models, IdentityHashMap<TextureAtlasSprite, Integer> sprites, int water, int lava, BlockColors blockColors) {
+	record Textures(BlockModelShaper models, IdentityHashMap<TextureAtlasSprite, Integer> sprites, int water, int lava, BlockColors blockColors) {
 	}
 
 	private static volatile @Nullable Textures textures;
-	private static @Nullable BlockStateModelSet seen;
+	/** The missing model, which every resource reload bakes again: when it's another one, so are the models and the atlas. */
+	private static @Nullable BakedModel seen;
 
 	/** Render thread, once a frame: takes the texture averages again after a resource reload. */
 	static void refresh(Minecraft mc) {
-		BlockStateModelSet models = mc.getModelManager().getBlockStateModelSet();
-		if (models == seen) return;
-		seen = models;
+		BakedModel missing = mc.getModelManager().getMissingModel();
+		if (missing == seen) return;
+		seen = missing;
 		try {
-			TextureAtlas atlas = mc.getAtlasManager().getAtlasOrThrow(AtlasIds.BLOCKS);
+			TextureAtlas atlas = mc.getModelManager().getAtlas(TextureAtlas.LOCATION_BLOCKS);
 			Map<ResourceLocation, TextureAtlasSprite> byName = ((TextureAtlasAccessor) atlas).afterburner$texturesByName();
 			IdentityHashMap<TextureAtlasSprite, Integer> sprites = new IdentityHashMap<>(byName.size() * 2);
 			for (TextureAtlasSprite sprite : byName.values()) sprites.put(sprite, average(sprite.contents()));
 			int water = average(atlas.getSprite(ResourceLocation.withDefaultNamespace("block/water_still")).contents());
 			int lava = average(atlas.getSprite(ResourceLocation.withDefaultNamespace("block/lava_still")).contents());
-			textures = new Textures(models, sprites, water, lava, mc.getBlockColors());
+			textures = new Textures(mc.getModelManager().getBlockModelShaper(), sprites, water, lava, mc.getBlockColors());
 		} catch (RuntimeException e) {
 			textures = null;
 		}
@@ -80,11 +80,11 @@ final class LodColors {
 		try {
 			for (int y = 0; y < h; y += step) {
 				for (int x = 0; x < w; x += step) {
-					int argb = image.getPixel(x, y);
-					int alpha = argb >>> 24;
-					r += (long) (argb >> 16 & 255) * alpha;
-					g += (long) (argb >> 8 & 255) * alpha;
-					b += (long) (argb & 255) * alpha;
+					int abgr = image.getPixelRGBA(x, y);
+					int alpha = abgr >>> 24;
+					r += (long) (abgr & 255) * alpha;
+					g += (long) (abgr >> 8 & 255) * alpha;
+					b += (long) (abgr >> 16 & 255) * alpha;
 					a += alpha;
 					n++;
 				}
@@ -110,7 +110,6 @@ final class LodColors {
 		tints.defaultReturnValue(-1);
 	}
 	private final SingleThreadedRandomSource random = new SingleThreadedRandomSource(42L);
-	private final List<BlockStateModelPart> parts = new ArrayList<>();
 	private final TintGetter getter = new TintGetter();
 
 	/** Starts a mesh: false if there are no textures to color it with yet. */
@@ -132,7 +131,7 @@ final class LodColors {
 		byte kind = world.kind(id);
 		if (kind == LodKinds.WATER) return tinted(0, t.water & 0xFFFFFF, tint(world, id, biome, -2));
 		if (kind == LodKinds.LAVA) return t.lava & 0xFFFFFF;
-		if (id >= faces.length) faces = java.util.Arrays.copyOf(faces, Math.max(id + 1, faces.length * 2));
+		if (id >= faces.length) faces = Arrays.copyOf(faces, Math.max(id + 1, faces.length * 2));
 		int[] f = faces[id];
 		if (f == null) faces[id] = f = faces(world.state(id), t);
 		int base = f[face], part = f[6 + face];
@@ -159,10 +158,10 @@ final class LodColors {
 				if (layer == -2) {
 					tint = b.getWaterColor();
 				} else if (layer >= 0) {
-					BlockState state = world.state(id);
-					BlockTintSource source = using.blockColors().getTintSource(state, layer);
 					getter.biome = b;
-					if (source != null) tint = source.colorInWorld(state, getter, BlockPos.ZERO);
+					// -1 when the block has no color provider.
+					int c = using.blockColors().getColor(world.state(id), getter, BlockPos.ZERO, layer);
+					if (c != -1) tint = c;
 				}
 			} catch (RuntimeException e) {
 				tint = 0xFFFFFF;
@@ -176,20 +175,20 @@ final class LodColors {
 	private int[] faces(BlockState state, Textures t) {
 		int[] out = new int[13];
 		out[12] = -1;
-		parts.clear();
-		try {
-			random.setSeed(42L);
-			t.models().get(state).collectParts(random, parts);
-		} catch (RuntimeException e) {
-			parts.clear();
-		}
 		float[] all = new float[7];
 		float[][] sides = new float[6][7];
-		for (BlockStateModelPart part : parts) {
+		try {
+			BakedModel model = t.models().getBlockModel(state);
 			for (Direction d : Direction.values()) {
-				for (BakedQuad q : part.getQuads(d)) add(sides[d.ordinal()], all, q, t, out);
+				random.setSeed(42L);
+				for (BakedQuad q : model.getQuads(state, d, random)) add(sides[d.ordinal()], all, q, t, out);
 			}
-			for (BakedQuad q : part.getQuads(null)) add(sides[q.direction().ordinal()], all, q, t, out);
+			random.setSeed(42L);
+			for (BakedQuad q : model.getQuads(state, null, random)) add(sides[q.getDirection().ordinal()], all, q, t, out);
+		} catch (RuntimeException e) {
+			Arrays.fill(all, 0);
+			for (float[] side : sides) Arrays.fill(side, 0);
+			out[12] = -1;
 		}
 		int fallback = 0;
 		if (all[6] == 0) fallback = state.getMapColor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).col;
@@ -206,13 +205,12 @@ final class LodColors {
 	}
 
 	private static void add(float[] side, float[] all, BakedQuad q, Textures t, int[] out) {
-		BakedQuad.MaterialInfo info = q.materialInfo();
-		Integer c = t.sprites().get(info.sprite());
+		Integer c = t.sprites().get(q.getSprite());
 		if (c == null) return;
 		float a = (c >>> 24) / 255.0F;
 		if (a == 0) return;
-		int at = info.tintIndex() >= 0 ? 3 : 0;
-		if (info.tintIndex() >= 0 && out[12] < 0) out[12] = info.tintIndex();
+		int at = q.isTinted() ? 3 : 0;
+		if (q.isTinted() && out[12] < 0) out[12] = q.getTintIndex();
 		for (float[] s : new float[][]{side, all}) {
 			s[at] += (c >> 16 & 255) * a;
 			s[at + 1] += (c >> 8 & 255) * a;
@@ -227,16 +225,28 @@ final class LodColors {
 
 	/** A world of one biome, for the tint sources. */
 	private static final class TintGetter implements BlockAndTintGetter {
+		/** No sky or block light: the color providers don't ask for any. */
+		private static final LevelLightEngine NO_LIGHT = new LevelLightEngine(new LightChunkGetter() {
+			@Override
+			public @Nullable LightChunk getChunkForLighting(int x, int z) {
+				return null;
+			}
+
+			@Override
+			public BlockGetter getLevel() {
+				return EmptyBlockGetter.INSTANCE;
+			}
+		}, false, false);
 		@Nullable Biome biome;
 
 		@Override
-		public CardinalLighting cardinalLighting() {
-			return CardinalLighting.DEFAULT;
+		public float getShade(Direction direction, boolean shade) {
+			return 1.0F;
 		}
 
 		@Override
 		public LevelLightEngine getLightEngine() {
-			return LevelLightEngine.EMPTY;
+			return NO_LIGHT;
 		}
 
 		@Override
@@ -265,7 +275,7 @@ final class LodColors {
 		}
 
 		@Override
-		public int getMinY() {
+		public int getMinBuildHeight() {
 			return 0;
 		}
 	}

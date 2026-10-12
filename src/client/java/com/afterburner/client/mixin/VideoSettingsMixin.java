@@ -1,10 +1,8 @@
 package com.afterburner.client.mixin;
 
 import com.afterburner.client.gui.SettingsScreen;
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.client.gui.screens.options.VideoSettingsScreen;
@@ -26,8 +24,8 @@ abstract class VideoSettingsMixin extends OptionsSubScreen {
 	@Inject(method = "addOptions", at = @At("TAIL"))
 	private void afterburner$addSettingsButton(CallbackInfo ci) {
 		if (list == null) return;
-		list.addSmall(List.of(new StringWidget(Component.translatable("afterburner.settings.title").withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
+		list.addSmall(List.of(SettingsScreen.header(Component.translatable("afterburner.settings.title"), font)));
 		list.addSmall(List.of(Button.builder(Component.translatable("afterburner.settings.button"),
-				b -> minecraft.setScreen(new SettingsScreen(this, options))).build()));
+				b -> minecraft.setScreen(new SettingsScreen(this, options))).width(310).build()));
 	}
 }

@@ -10,7 +10,7 @@ import com.afterburner.client.perf.FpsTarget;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -33,10 +33,10 @@ public final class BenchCommand {
 	}
 
 	public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher, CommandBuildContext context) {
-		dispatcher.register(ClientCommands.literal("afterburner")
-				.then(ClientCommands.literal("bench")
+		dispatcher.register(ClientCommandManager.literal("afterburner")
+				.then(ClientCommandManager.literal("bench")
 						.executes(c -> start(c.getSource(), 30))
-						.then(ClientCommands.argument("seconds", IntegerArgumentType.integer(5, 600))
+						.then(ClientCommandManager.argument("seconds", IntegerArgumentType.integer(5, 600))
 								.executes(c -> start(c.getSource(), IntegerArgumentType.getInteger(c, "seconds"))))));
 	}
 

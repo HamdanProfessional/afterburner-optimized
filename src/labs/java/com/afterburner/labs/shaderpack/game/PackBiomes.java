@@ -68,13 +68,13 @@ final class PackBiomes {
 	}
 
 	static int id(Holder<Biome> biome) {
-		return biome.unwrapKey().filter(key -> key.identifier().getNamespace().equals("minecraft"))
-			.map(key -> ids().getOrDefault(key.identifier().getPath(), 0)).orElse(0);
+		return biome.unwrapKey().filter(key -> key.location().getNamespace().equals("minecraft"))
+			.map(key -> ids().getOrDefault(key.location().getPath(), 0)).orElse(0);
 	}
 
 	static int category(Holder<Biome> biome) {
-		Integer known = biome.unwrapKey().filter(key -> key.identifier().getNamespace().equals("minecraft"))
-			.map(key -> VANILLA.get(key.identifier().getPath())).orElse(null);
+		Integer known = biome.unwrapKey().filter(key -> key.location().getNamespace().equals("minecraft"))
+			.map(key -> VANILLA.get(key.location().getPath())).orElse(null);
 		if (known != null) return known;
 		for (Map.Entry<TagKey<Biome>, Integer> c : FALLBACK) {
 			if (biome.is(c.getKey())) return c.getValue();
@@ -89,7 +89,7 @@ final class PackBiomes {
 			for (Field f : Biomes.class.getDeclaredFields()) {
 				if (!Modifier.isStatic(f.getModifiers()) || f.getType() != ResourceKey.class) continue;
 				try {
-					m.putIfAbsent(((ResourceKey<?>) f.get(null)).identifier().getPath(), m.size());
+					m.putIfAbsent(((ResourceKey<?>) f.get(null)).location().getPath(), m.size());
 				} catch (IllegalAccessException | ClassCastException e) {
 					// Not a biome's key.
 				}

@@ -17,12 +17,13 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Turns a pack program (preprocessed GLSL, any version from 120 up, compatibility built-ins and all) into the GLSL the game
- * compiles: {@code #version 330} (or the pack's, if newer) with separate shader objects, every in/out at an explicit location, plain uniforms in the
+ * driver compiles: {@code #version 330} core (or the pack's, if newer, or 400 for the functions it needs), plain uniforms in the
  * std140 blocks of a {@link UniformLayout}, and the old built-ins (gl_Vertex, gl_ModelViewMatrix, gl_FragData, texture2D, ...)
- * rebuilt from the game's own vertex inputs and uniform blocks.
+ * rebuilt from the game's own vertex inputs and uniforms. Vertex inputs and varyings go by name (the program binds the inputs
+ * in the order of the game's vertex format), fragment outputs at the locations of the pass's color attachments.
  * <p>
- * Packs get normal OpenGL depth (near -1, far 1, depth cleared to 1, LESS) although the game uses reversed depth; see
- * {@link TranslateTarget}. Shadow samplers become plain samplers compared in the shader, as the game has no compare samplers.
+ * The game draws with OpenGL's depth (near -1, far 1, depth cleared to 1), as packs expect; see {@link TranslateTarget}.
+ * Shadow samplers become plain samplers compared in the shader, so the shadow map's textures need no compare mode.
  * <p>
  * Works on tokens, not a full parse: global declarations are found at the top level, everything else is renamed in place.
  */
@@ -113,15 +114,15 @@ public final class GlslTranslator {
 		public final Set<String> images;
 		/** The storage buffer blocks, both stages: block name to binding. */
 		public final Map<String, Integer> buffers;
-		/** Uniform blocks used, both stages: the game's (DynamicTransforms, Projection, ...) and {@link UniformLayout}'s. */
-		public final Set<String> blocks;
+		/** The game's uniforms used, both stages (ModelViewMat, ProjMat, ...; see {@link TranslateTarget#GAME_UNIFORMS}). */
+		public final Set<String> uniforms;
 		/** The buffer each fragment output writes, in gl_FragData order (-1: written nowhere). */
 		public final int[] drawBuffers;
 		public final List<Varying> varyings;
 		public final List<String> warnings;
 
 		Program(String vertex, String fragment, int vertexHeader, int fragmentHeader, List<String> vertexOrigins, List<String> fragmentOrigins,
-				Set<String> samplers, Set<String> images, Map<String, Integer> buffers, Set<String> blocks, int[] drawBuffers, List<Varying> varyings,
+				Set<String> samplers, Set<String> images, Map<String, Integer> buffers, Set<String> uniforms, int[] drawBuffers, List<Varying> varyings,
 				List<String> warnings) {
 			this.vertex = vertex;
 			this.fragment = fragment;
@@ -132,7 +133,7 @@ public final class GlslTranslator {
 			this.samplers = samplers;
 			this.images = images;
 			this.buffers = buffers;
-			this.blocks = blocks;
+			this.uniforms = uniforms;
 			this.drawBuffers = drawBuffers;
 			this.varyings = varyings;
 			this.warnings = warnings;
@@ -148,8 +149,7 @@ public final class GlslTranslator {
 	}
 
 	/**
-	 * A translated compute program: GLSL 430, compiled by the driver as it is (the game's shader compiler takes vertex and
-	 * fragment shaders only), with the same uniform blocks as the pack's other programs.
+	 * A translated compute program: GLSL 430, with the same uniform blocks as the pack's other programs.
 	 */
 	public static final class Compute {
 		public final String source;
@@ -215,8 +215,8 @@ public final class GlslTranslator {
 		"textureGrad", "textureGradOffset", "textureProjGrad", "textureProjGradOffset", "textureSize");
 
 	/**
-	 * Built-in functions of GLSL 400 and 420 that the game's compiler has in version 330 too, which an older pack may have
-	 * defined itself (Bliss's fma).
+	 * Built-in functions of GLSL 400 and 420, which an older pack may have defined itself (Bliss's fma); one that calls them
+	 * without defining them gets that version.
 	 */
 	private static final Set<String> FUNCTIONS_400 = Set.of(
 		"fma", "bitCount", "findLSB", "findMSB", "bitfieldExtract", "bitfieldInsert", "bitfieldReverse", "frexp", "ldexp", "uaddCarry", "usubBorrow",
@@ -234,28 +234,25 @@ public final class GlslTranslator {
 	/** ... of which EXT_gpu_shader4 already had these. */
 	private static final Set<String> GPU_SHADER4_KEYWORDS = Set.of("flat", "noperspective", "uint", "uvec2", "uvec3", "uvec4");
 	/**
-	 * Words the game's compiler reserves (it compiles for Vulkan) that OpenGL's GLSL doesn't, which packs use as names
+	 * Words Vulkan's GLSL reserves, which some drivers refuse as names too and packs use as names
 	 * ("vec4 bicubic(sampler2D sampler, vec2 uv)").
 	 */
 	private static final Set<String> VULKAN_KEYWORDS = Set.of(
 		"sampler", "samplerShadow", "textureBuffer", "itextureBuffer", "utextureBuffer", "texture1DArray", "texture2DArray", "textureCubeArray",
 		"texture2DMS", "texture2DMSArray", "subpassInput", "isubpassInput", "usubpassInput", "subpassInputMS", "isubpassInputMS", "usubpassInputMS");
-	/** Shadow sampler types and the plain ones they become (the game has no compare samplers). */
+	/** Shadow sampler types and the plain ones they become (compared in the shader). */
 	private static final Map<String, String> SHADOW_TYPES = Map.of(
 		"sampler1DShadow", "sampler1D", "sampler2DShadow", "sampler2D", "sampler2DArrayShadow", "sampler2DArray", "samplerCubeShadow", "samplerCube",
 		"sampler2DRectShadow", "sampler2DRect");
 
-	/** Names our generated code declares (vertex elements, the game's blocks and their members); a pack's own that clash get "_ab". */
+	/** Names our generated code declares (vertex elements, the game's uniforms); a pack's own that clash get "_ab". */
 	private static final Set<String> RESERVED = new HashSet<>(Set.of(
 		"Position", "Color", "UV0", "UV1", "UV2", "UV3", "Normal", "LineWidth", "Sampler0", "Sampler1", "Sampler2", "Lighting",
 		"AbMidTex", "AbNormal", "AbBlock", "ab_unoct",
 		UniformLayout.FRAME_BLOCK, UniformLayout.DRAW_BLOCK));
 
 	static {
-		for (Map.Entry<String, List<String>> block : TranslateTarget.GAME_BLOCKS.entrySet()) {
-			RESERVED.add(block.getKey());
-			for (String member : block.getValue()) RESERVED.add(member.substring(member.indexOf(' ') + 1));
-		}
+		RESERVED.addAll(TranslateTarget.GAME_UNIFORMS.keySet());
 	}
 
 	/**
@@ -312,14 +309,6 @@ public final class GlslTranslator {
 		}
 		""";
 
-	private static final String TO_GL = """
-		#ifdef RENDERPEARL_DEPTH_IS_ZERO_TO_ONE
-		const mat4 ab_ToGl = mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -2.0, 0.0, 0.0, 0.0, 1.0, 1.0);
-		#else
-		const mat4 ab_ToGl = mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
-		#endif
-		""";
-
 	/** OptiFine's lightmap texture matrix (TEXTURE_MATRIX_2). */
 	private static final String LIGHTMAP_MATRIX = "mat4(0.00390625, 0.0, 0.0, 0.0, 0.0, 0.00390625, 0.0, 0.0, 0.0, 0.0, 0.00390625, 0.0, 0.03125, 0.03125, 0.03125, 1.0)";
 
@@ -357,8 +346,8 @@ public final class GlslTranslator {
 		""";
 
 	/**
-	 * textureGather of another component than red: GLSL 400's, which the game's GLSL 330 can't give, so the four texels (in
-	 * textureGather's order) are fetched.
+	 * textureGather of another component than red: GLSL 400's, which GLSL 330 can't give, so the four texels (in textureGather's
+	 * order) are fetched.
 	 */
 	private static final String GATHER = """
 		vec4 ab_gather(vec4 a, vec4 b, vec4 d, vec4 e, int c) { return vec4(a[c], b[c], d[c], e[c]); }
@@ -993,7 +982,7 @@ public final class GlslTranslator {
 
 	/** Adds a stage's plain uniforms to the pack's layout. Call for every program before {@link UniformLayout#finish()}. */
 	public static void collectUniforms(Parsed parsed, UniformLayout layout) {
-		// gl_Fog where the game's Fog block isn't bound (composite, final...) reads these.
+		// gl_Fog where the game's fog uniforms aren't set (composite, final...) reads these.
 		if (parsed.idents.contains("gl_Fog")) {
 			layout.add("ab_fogColor", "vec3", 0);
 			for (String name : List.of("ab_fogStart", "ab_fogEnd", "ab_fogDensity")) layout.add(name, "float", 0);
@@ -1164,13 +1153,13 @@ public final class GlslTranslator {
 
 		Set<String> samplers = new LinkedHashSet<>();
 		Set<String> images = new LinkedHashSet<>();
-		Set<String> blocks = new LinkedHashSet<>();
-		StageOut vertex = emit(vs, target, layout, varyings, Map.of(), Map.of(), Map.of(), waterShadow, samplers, images, blocks, warnings);
-		StageOut fragment = emit(fs, target, layout, varyings, outputNames, outputTypes, outputLocations, waterShadow, samplers, images, blocks,
-			warnings);
+		Set<String> gameUniforms = new LinkedHashSet<>();
+		StageOut vertex = emit(vs, target, layout, varyings, Map.of(), Map.of(), Map.of(), waterShadow, samplers, images, gameUniforms, warnings);
+		StageOut fragment = emit(fs, target, layout, varyings, outputNames, outputTypes, outputLocations, waterShadow, samplers, images,
+			gameUniforms, warnings);
 		Map<String, Integer> storage = new LinkedHashMap<>(vs.buffers);
 		storage.putAll(fs.buffers);
-		return new Program(vertex.text, fragment.text, vertex.header, fragment.header, vs.origins, fs.origins, samplers, images, storage, blocks,
+		return new Program(vertex.text, fragment.text, vertex.header, fragment.header, vs.origins, fs.origins, samplers, images, storage, gameUniforms,
 			written, varyings, warnings);
 	}
 
@@ -1280,7 +1269,7 @@ public final class GlslTranslator {
 
 	private static StageOut emit(Parsed p, TranslateTarget target, UniformLayout layout, List<Varying> varyings, Map<Integer, String> outputNames,
 			Map<Integer, String> outputTypes, Map<Integer, Integer> outputLocations, boolean waterShadow, Set<String> allSamplers,
-			Set<String> allImages, Set<String> allBlocks, List<String> warnings) throws TranslateException {
+			Set<String> allImages, Set<String> allUniforms, List<String> warnings) throws TranslateException {
 		boolean vertex = p.stage == Stage.VERTEX;
 		boolean compute = p.stage == Stage.COMPUTE;
 		String where = p.stage.name().toLowerCase(Locale.ROOT);
@@ -1405,9 +1394,12 @@ public final class GlslTranslator {
 
 		// The header.
 		// The pack's version where it's newer: its integer conversions, bitfield functions, memory qualifiers, ...
-		int version = Math.min(Math.max(p.version, compute ? 430 : 330), 460);
-		StringBuilder header = new StringBuilder(compute ? "#version " + version + " core\n"
-			: "#version " + version + "\n#extension GL_ARB_separate_shader_objects : require\n");
+		// GLSL 400's and 420's functions the pack calls without defining them need that version (GLSL 330 has no textureGather).
+		int needs = 330;
+		for (String f : FUNCTIONS_400) if (p.idents.contains(f) && !p.functions.contains(f)) needs = 400;
+		for (String f : FUNCTIONS_420) if (p.idents.contains(f) && !p.functions.contains(f)) needs = 420;
+		int version = Math.min(Math.max(p.version, compute ? 430 : needs), 460);
+		StringBuilder header = new StringBuilder("#version " + version + " core\n");
 		Set<String> extensions = new LinkedHashSet<>();
 		for (GlslPreprocessor.Extension e : p.extensions) {
 			if (Set.of("GL_ARB_shader_texture_lod", "GL_EXT_gpu_shader4", "GL_ARB_explicit_attrib_location", "GL_ARB_separate_shader_objects",
@@ -1427,28 +1419,13 @@ public final class GlslTranslator {
 		for (String e : extensions) header.append("#extension ").append(e).append(" : enable\n");
 		String epilogue = vertex ? target.epilogue : "";
 		String generated = setup + "\n" + builtinGlobals + globals + epilogue;
-		if (generated.contains("ab_ToGl")) header.append(TO_GL);
 		Set<String> generatedIdents = identifiers(generated);
-		Set<String> declared = new HashSet<>();
-		for (String block : target.blocks) {
-			List<String> members = TranslateTarget.GAME_BLOCKS.get(block);
-			boolean needed = false;
-			for (String member : members) {
-				String name = member.substring(member.indexOf(' ') + 1);
-				needed |= generatedIdents.contains(name) && !declared.contains(name);
-			}
-			if (!needed) continue;
-			header.append("layout(std140) uniform ").append(block).append(" {\n");
-			for (String member : members) {
-				header.append('\t').append(member).append(";\n");
-				declared.add(member.substring(member.indexOf(' ') + 1));
-			}
-			header.append("};\n");
-			allBlocks.add(block);
+		for (String uniform : target.uniforms) {
+			if (!generatedIdents.contains(uniform)) continue;
+			header.append("uniform ").append(TranslateTarget.GAME_UNIFORMS.get(uniform)).append(' ').append(uniform).append(";\n");
+			allUniforms.add(uniform);
 		}
 		header.append(layout.declaration(false)).append(layout.declaration(true));
-		allBlocks.add(UniformLayout.FRAME_BLOCK);
-		allBlocks.add(UniformLayout.DRAW_BLOCK);
 		for (Map.Entry<String, String> sampler : samplerTypes.entrySet()) {
 			header.append("uniform ").append(sampler.getValue()).append(' ').append(sampler.getKey()).append(";\n");
 			allSamplers.add(sampler.getKey());
@@ -1457,10 +1434,8 @@ public final class GlslTranslator {
 		allImages.addAll(images.keySet());
 		if (compute) header.append(p.localSize).append('\n');
 		if (vertex) {
-			int input = 0;
 			for (Map.Entry<String, String> in : target.inputs.entrySet()) {
-				if (!generatedIdents.contains(in.getKey())) continue;
-				header.append("layout(location = ").append(input++).append(") in ").append(in.getValue()).append(' ').append(in.getKey()).append(";\n");
+				if (generatedIdents.contains(in.getKey())) header.append("in ").append(in.getValue()).append(' ').append(in.getKey()).append(";\n");
 			}
 		}
 		for (Varying v : varyings) {
@@ -1489,16 +1464,13 @@ public final class GlslTranslator {
 		String keeps = !vertex && target.alphaTest != null && "vec4".equals(outputTypes.get(0)) && outputNames.containsKey(0)
 			? target.alphaTest.keeps(outputNames.get(0) + ".a") : null;
 		if (keeps != null) out.append("\tif (!(").append(keeps).append(")) discard;\n");
-		if (vertex) {
-			out.append("#ifdef RENDERPEARL_DEPTH_IS_ZERO_TO_ONE\n\tgl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n#endif\n");
-		}
 		out.append("}\n");
 		if (!p.idents.contains("main")) throw new TranslateException("The " + where + " shader has no main()");
 		return new StageOut(out.toString(), headerLines);
 	}
 
 	private static String varying(Varying v, boolean vertex) {
-		return "layout(location = " + v.location + ") " + (v.flat ? "flat " : v.noperspective ? "noperspective " : "") + (vertex ? "out " : "in ") + v.type
+		return (v.flat ? "flat " : v.noperspective ? "noperspective " : "") + (vertex ? "out " : "in ") + v.type
 			+ " " + v.name + array(v.arraySize) + ";";
 	}
 
@@ -1547,8 +1519,8 @@ public final class GlslTranslator {
 		}
 		b.put("gl_TextureMatrix", new Builtin("ab_TextureMatrix", "mat4[3]",
 			"ab_TextureMatrix[0] = " + target.textureMatrix + ";\n\tab_TextureMatrix[1] = " + LIGHTMAP_MATRIX + ";\n\tab_TextureMatrix[2] = ab_TextureMatrix[1]"));
-		b.put("gl_Fog", new Builtin("ab_Fog", "ab_FogParameters", target.blocks.contains("Fog")
-			? "ab_Fog = ab_FogParameters(FogColor, 1.0, FogRenderDistanceStart, FogRenderDistanceEnd, 1.0 / max(FogRenderDistanceEnd - FogRenderDistanceStart, 0.0001))"
+		b.put("gl_Fog", new Builtin("ab_Fog", "ab_FogParameters", target.uniforms.containsAll(List.of("FogColor", "FogStart", "FogEnd"))
+			? "ab_Fog = ab_FogParameters(FogColor, 1.0, FogStart, FogEnd, 1.0 / max(FogEnd - FogStart, 0.0001))"
 			: "ab_Fog = ab_FogParameters(vec4(ab_fogColor, 1.0), ab_fogDensity, ab_fogStart, ab_fogEnd, 1.0 / max(ab_fogEnd - ab_fogStart, 0.0001))"));
 		b.put("gl_FogFragCoord", new Builtin("ab_FogFragCoord", "", null));
 		b.put("gl_TexCoord", new Builtin("ab_TexCoord", "", null));
@@ -1566,8 +1538,6 @@ public final class GlslTranslator {
 			b.put("gl_BackColor", new Builtin("ab_BackColor", "vec4", ""));
 			b.put("gl_BackSecondaryColor", new Builtin("ab_BackSecondaryColor", "vec4", ""));
 			b.put("gl_ClipVertex", new Builtin("ab_ClipVertex", "vec4", ""));
-			b.put("gl_VertexID", new Builtin("gl_VertexIndex", "", null));
-			b.put("gl_InstanceID", new Builtin("gl_InstanceIndex", "", null));
 		} else if (p.stage == Stage.FRAGMENT) {
 			b.put("gl_Color", new Builtin("ab_FrontColor", "", null));
 			b.put("gl_SecondaryColor", new Builtin("ab_FrontSecondaryColor", "", null));
@@ -1665,7 +1635,7 @@ public final class GlslTranslator {
 						continue;
 					}
 				}
-				// A gather of another component than red (Hysteria's depth in .b): the game's GLSL 330 can't, so it's fetched texel by texel.
+				// A gather of another component than red (Hysteria's depth in .b): GLSL 330 can't, so it's fetched texel by texel.
 				if (name.startsWith("textureGather") && open >= 0 && in.get(open).text().equals("(")) {
 					List<String> args = arguments(in, open);
 					if (args.size() == (name.equals("textureGather") ? 3 : 4) && !args.get(args.size() - 1).equals("0")) {
@@ -1721,6 +1691,6 @@ public final class GlslTranslator {
 	/** Built-ins GLSL 330 still has. */
 	private static final Set<String> KNOWN_GL = Set.of(
 		"gl_Position", "gl_PointSize", "gl_ClipDistance", "gl_FragCoord", "gl_FrontFacing", "gl_PointCoord", "gl_FragDepth",
-		"gl_PrimitiveID", "gl_DepthRange", "gl_Layer", "gl_SampleID", "gl_SamplePosition", "gl_VertexIndex", "gl_InstanceIndex", "gl_MaxDrawBuffers", "gl_MaxTextureImageUnits", "gl_MaxVertexAttribs",
+		"gl_PrimitiveID", "gl_DepthRange", "gl_Layer", "gl_SampleID", "gl_SamplePosition", "gl_VertexID", "gl_InstanceID", "gl_MaxDrawBuffers", "gl_MaxTextureImageUnits", "gl_MaxVertexAttribs",
 		"gl_GlobalInvocationID", "gl_LocalInvocationID", "gl_WorkGroupID", "gl_NumWorkGroups", "gl_LocalInvocationIndex", "gl_WorkGroupSize");
 }

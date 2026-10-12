@@ -53,7 +53,7 @@ public final class FarLandCommand {
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context,
 			Commands.CommandSelection selection) {
 		dispatcher.register(Commands.literal("afterburner-farland")
-				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+				.requires(source -> source.hasPermission(Commands.LEVEL_GAMEMASTERS))
 				.executes(c -> run(c.getSource(), 3, 0, 0))
 				.then(Commands.argument("radius", IntegerArgumentType.integer(0, 16))
 						.executes(c -> run(c.getSource(), IntegerArgumentType.getInteger(c, "radius"), 0, 0))
@@ -83,7 +83,7 @@ public final class FarLandCommand {
 			for (int dx = -radius; dx <= radius; dx++) {
 				ChunkPos pos = new ChunkPos(cx + dx, cz + dz);
 				area.add(pos);
-				loads.add(chunks.addTicketAndLoadWithRadius(ChunkCommand.TICKET, pos, 0));
+				loads.add(ChunkCommand.load(chunks, pos));
 			}
 		}
 		source.sendSuccess(() -> Component.literal("Loading " + area.size() + " chunks for the far land check...").withStyle(ChatFormatting.GRAY), true);
@@ -100,7 +100,7 @@ public final class FarLandCommand {
 				source.sendFailure(Component.literal("Far land check failed: " + e));
 				Afterburner.LOGGER.error("Far land check failed", e);
 			} finally {
-				for (ChunkPos pos : area) chunks.removeTicketWithRadius(ChunkCommand.TICKET, pos, 0);
+				for (ChunkPos pos : area) ChunkCommand.release(chunks, pos);
 				running = false;
 			}
 		}, server);
@@ -130,7 +130,7 @@ public final class FarLandCommand {
 		Set<ChunkPos> inArea = new HashSet<>(area);
 		FarStructures structures = land.structures();
 		for (ChunkPos chunkPos : area) {
-			for (StructureStart start : level.getChunk(chunkPos.x(), chunkPos.z()).getAllStarts().values()) {
+			for (StructureStart start : level.getChunk(chunkPos.x, chunkPos.z).getAllStarts().values()) {
 				if (!start.isValid() || start.getStructure().step() != GenerationStep.Decoration.SURFACE_STRUCTURES) continue;
 				realStarts.add(name(level, start));
 				for (StructurePiece piece : start.getPieces()) {
@@ -139,7 +139,7 @@ public final class FarLandCommand {
 				}
 			}
 			if (structures == null) continue;
-			for (FarStructures.Placed placed : structures.touching(chunkPos.x(), chunkPos.z())) {
+			for (FarStructures.Placed placed : structures.touching(chunkPos.x, chunkPos.z)) {
 				if (inArea.contains(placed.start().getChunkPos())) madeStarts.add(name(level, placed.start()));
 			}
 		}
@@ -161,7 +161,7 @@ public final class FarLandCommand {
 					boxExamples.add((chunkPos.getMinBlockX() + (c & 15)) + " " + (chunkPos.getMinBlockZ() + (c >> 4)) + ": box " + box.ground[c] + ", column " + sheet.ground[c]);
 				}
 			}
-			LevelChunk chunk = level.getChunk(chunkPos.x(), chunkPos.z());
+			LevelChunk chunk = level.getChunk(chunkPos.x, chunkPos.z);
 			for (int z = 0; z < 16; z++) {
 				for (int x = 0; x < 16; x++) {
 					int c = z * 16 + x, bx = chunkPos.getMinBlockX() + x, bz = chunkPos.getMinBlockZ() + z;
@@ -335,8 +335,8 @@ public final class FarLandCommand {
 	}
 
 	private static String name(ServerLevel level, StructureStart start) {
-		return level.registryAccess().lookupOrThrow(Registries.STRUCTURE).getKey(start.getStructure()) + " at " + start.getChunkPos().x() + ", "
-				+ start.getChunkPos().z();
+		return level.registryAccess().registryOrThrow(Registries.STRUCTURE).getKey(start.getStructure()) + " at " + start.getChunkPos().x + ", "
+				+ start.getChunkPos().z;
 	}
 
 	private static boolean covered(List<BoundingBox> boxes, int x, int z) {
@@ -426,7 +426,7 @@ public final class FarLandCommand {
 	}
 
 	private static String name(BlockState state) {
-		return state.getBlock().builtInRegistryHolder().key().identifier().getPath();
+		return state.getBlock().builtInRegistryHolder().key().location().getPath();
 	}
 
 	/** Lowest, 1st percentile, median, 99th, highest of a histogram centered on 100. */

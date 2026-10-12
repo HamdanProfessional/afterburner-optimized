@@ -298,7 +298,7 @@ final class LodWorker {
 	private static final ResourceLocation PLAINS = ResourceLocation.withDefaultNamespace("plains");
 
 	private static ResourceLocation name(@Nullable Holder<Biome> biome) {
-		return biome == null ? PLAINS : biome.unwrapKey().map(k -> k.identifier()).orElse(PLAINS);
+		return biome == null ? PLAINS : biome.unwrapKey().map(k -> k.location()).orElse(PLAINS);
 	}
 
 	/** Puts the sheet in at its level, and works out the levels above it as far as they change. */

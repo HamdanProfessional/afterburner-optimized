@@ -27,9 +27,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -79,7 +78,7 @@ public final class BaseCommand {
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context,
 			Commands.CommandSelection selection) {
 		dispatcher.register(Commands.literal("afterburner-base")
-				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+				.requires(source -> source.hasPermission(Commands.LEVEL_GAMEMASTERS))
 				.executes(c -> run(c.getSource(), 60))
 				.then(Commands.argument("seconds", IntegerArgumentType.integer(10, 600))
 						.executes(c -> run(c.getSource(), IntegerArgumentType.getInteger(c, "seconds")))));
@@ -102,7 +101,7 @@ public final class BaseCommand {
 		List<CompletableFuture<?>> loads = new ArrayList<>();
 		for (int cz = -3; cz <= 2; cz++) {
 			for (int cx = -3; cx <= 2; cx++) {
-				loads.add(level.getChunkSource().addTicketAndLoadWithRadius(ChunkCommand.TICKET, new ChunkPos(cx, cz), 0));
+				loads.add(ChunkCommand.load(level.getChunkSource(), new ChunkPos(cx, cz)));
 			}
 		}
 		CompletableFuture.allOf(loads.toArray(CompletableFuture[]::new)).thenRunAsync(() -> {
@@ -234,14 +233,14 @@ public final class BaseCommand {
 
 	private static void spawnMobs(ServerLevel level) {
 		Random random = new Random(20261006L);
-		spawn(level, random, EntityTypes.VILLAGER, 60, -37, -37, -13, -13);
-		spawn(level, random, EntityTypes.COW, 150, 13, -37, 37, -23);
-		spawn(level, random, EntityTypes.CHICKEN, 80, 13, -15, 25, -3);
-		spawn(level, random, EntityTypes.ZOMBIE, 100, -37, 13, -13, 37);
-		spawn(level, random, EntityTypes.SKELETON, 40, -37, 13, -13, 37);
+		spawn(level, random, EntityType.VILLAGER, 60, -37, -37, -13, -13);
+		spawn(level, random, EntityType.COW, 150, 13, -37, 37, -23);
+		spawn(level, random, EntityType.CHICKEN, 80, 13, -15, 25, -3);
+		spawn(level, random, EntityType.ZOMBIE, 100, -37, 13, -13, 37);
+		spawn(level, random, EntityType.SKELETON, 40, -37, 13, -13, 37);
 		// A few things that can be bumped into.
-		spawn(level, random, EntityTypes.OAK_BOAT, 8, 13, -37, 37, -23);
-		spawn(level, random, EntityTypes.MINECART, 8, -37, -37, -13, -13);
+		spawn(level, random, EntityType.BOAT, 8, 13, -37, 37, -23);
+		spawn(level, random, EntityType.MINECART, 8, -37, -37, -13, -13);
 	}
 
 	private static void spawn(ServerLevel level, Random random, EntityType<?> type, int count, int x0, int z0, int x1, int z1) {
@@ -250,7 +249,7 @@ public final class BaseCommand {
 			do {
 				pos = new BlockPos(random.nextInt(x0, x1 + 1), Y, random.nextInt(z0, z1 + 1));
 			} while (!level.getBlockState(pos).isAir());
-			if (type.spawn(level, pos, EntitySpawnReason.COMMAND) instanceof Mob mob) mob.setPersistenceRequired();
+			if (type.spawn(level, pos, MobSpawnType.COMMAND) instanceof Mob mob) mob.setPersistenceRequired();
 		}
 	}
 

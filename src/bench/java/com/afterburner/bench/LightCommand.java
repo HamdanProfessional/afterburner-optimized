@@ -43,7 +43,7 @@ import java.util.function.Consumer;
  * so runs with and without an optimization can be checked for giving the same light. Op only.
  */
 public final class LightCommand {
-	private static final int FLAGS = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS;
+	private static final int FLAGS = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE;
 	private static boolean running;
 
 	private LightCommand() {
@@ -52,7 +52,7 @@ public final class LightCommand {
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context,
 			Commands.CommandSelection selection) {
 		dispatcher.register(Commands.literal("afterburner-light")
-				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+				.requires(source -> source.hasPermission(Commands.LEVEL_GAMEMASTERS))
 				.executes(c -> run(c.getSource(), 16, 0, 0))
 				.then(Commands.argument("radius", IntegerArgumentType.integer(2, 32))
 						.executes(c -> run(c.getSource(), IntegerArgumentType.getInteger(c, "radius"), 0, 0))
@@ -86,7 +86,7 @@ public final class LightCommand {
 			for (int dx = -radius; dx <= radius; dx++) {
 				ChunkPos pos = new ChunkPos(cx + dx, cz + dz);
 				area.add(pos);
-				loads.add(chunks.addTicketAndLoadWithRadius(ChunkCommand.TICKET, pos, 0));
+				loads.add(ChunkCommand.load(chunks, pos));
 			}
 		}
 
@@ -156,7 +156,7 @@ public final class LightCommand {
 			}, server);
 		}
 		results.whenCompleteAsync((list, error) -> {
-			for (ChunkPos pos : area) chunks.removeTicketWithRadius(ChunkCommand.TICKET, pos, 0);
+			for (ChunkPos pos : area) ChunkCommand.release(chunks, pos);
 			running = false;
 			if (error != null) {
 				source.sendFailure(Component.literal("Light benchmark failed: " + error));
@@ -192,11 +192,11 @@ public final class LightCommand {
 
 	/** The height of a roof one block thick, 16 blocks above the highest ground under it. */
 	private static int roofY(ServerLevel level, int midX, int midZ) {
-		int top = level.getMinY();
+		int top = level.getMinBuildHeight();
 		for (int z = midZ - 48; z < midZ + 48; z++) {
 			for (int x = midX - 48; x < midX + 48; x++) top = Math.max(top, level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z));
 		}
-		return Math.min(top + 16, level.getMaxY() - 1);
+		return Math.min(top + 16, level.getMaxBuildHeight() - 2);
 	}
 
 	private static void roof(ServerLevel level, int midX, int y, int midZ, BlockState state, List<BlockPos> changed) {
@@ -219,7 +219,7 @@ public final class LightCommand {
 
 	private static CompletableFuture<?> waitAll(ThreadedLevelLightEngine light, List<ChunkPos> area) {
 		List<CompletableFuture<?>> waits = new ArrayList<>(area.size());
-		for (ChunkPos pos : area) waits.add(light.waitForPendingTasks(pos.x(), pos.z()));
+		for (ChunkPos pos : area) waits.add(light.waitForPendingTasks(pos.x, pos.z));
 		return CompletableFuture.allOf(waits.toArray(CompletableFuture[]::new));
 	}
 

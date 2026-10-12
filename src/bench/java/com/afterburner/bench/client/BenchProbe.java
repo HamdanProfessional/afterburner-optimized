@@ -2,7 +2,7 @@ package com.afterburner.bench.client;
 
 import com.afterburner.client.render.Probe;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
-import net.minecraft.client.renderer.state.level.CameraRenderState;
+import org.joml.Matrix4f;
 
 import java.util.List;
 
@@ -14,8 +14,9 @@ final class BenchProbe implements Probe {
 	}
 
 	@Override
-	public void chunksInView(List<SectionRenderDispatcher.RenderSection> sections, CameraRenderState camera) {
-		if (OcclusionProbe.ENABLED) OcclusionProbe.prepare(sections, camera.pos, camera.projectionMatrix, camera.viewRotationMatrix);
+	public void chunksInView(List<SectionRenderDispatcher.RenderSection> sections, double camX, double camY, double camZ, Matrix4f projection,
+			Matrix4f modelView) {
+		if (OcclusionProbe.ENABLED) OcclusionProbe.prepare(sections, camX, camY, camZ, projection, modelView);
 	}
 
 	@Override

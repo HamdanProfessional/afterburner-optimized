@@ -19,11 +19,22 @@ repositories {
 }
 
 sourceSets {
+	// The client assets (lang, shaders) live in src/client/resources. The mod's resource root is the main source set
+	// (the one with fabric.mod.json), so they must be included here too or neither the game nor the released jar sees
+	// them - the GUI shows raw translation keys and the chunk shaders go missing.
+	main {
+		resources.srcDir 'src/client/resources'
+	}
 	// The experimental parts: the shader pack loader, upscaling and far terrain, as a mod of its own (afterburner_labs)
 	// that plugs into Afterburner. The released jar carries it inside (see jar below), and the dev client loads it.
-	labs
+	labs {}
 	// The benchmark and check commands used while developing (afterburner_bench). Also only in the dev client.
-	bench
+	bench {}
+}
+
+// Client resources are now processed by both the main and the client source set: keep one copy per jar entry.
+tasks.withType(Jar).configureEach {
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 loom {
@@ -54,6 +65,9 @@ loom {
 			client()
 			configName = "Port Client"
 			runDir "run-plain"
+			source sourceSets.labs
+			// For perf runs: -PportVmArgs="-Dafterburner.perfLog=true" (also frameReuse/wideSections flags).
+			if (project.hasProperty('portVmArgs')) vmArgs(*project.property('portVmArgs').toString().split(' '))
 		}
 		compatClient {
 			client()
@@ -92,6 +106,9 @@ dependencies {
 	// remapper (fabric-convention-tags-v2 and fabric-tag-api-v1 both carry the same package-info class).
 	modImplementation "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:2.6.0+0865547519"
 	modImplementation "net.fabricmc.fabric-api:fabric-command-api-v2:2.2.28+6ced4dd919"
+	// Mod resources (assets: lang, shaders) are only exposed to the game through this module: without it the dev
+	// client shows raw translation keys and the chunk shaders are missing, even though the files are on the classpath.
+	modImplementation "net.fabricmc.fabric-api:fabric-resource-loader-v0:1.3.1+5b5275af19"
 
 	// Mixin and its companions. The 26.3 toolchain provided these implicitly; on 1.21.1 they are plain
 	// dependencies (MixinExtras also rides inside fabric-loader at runtime). No annotation processor:
@@ -103,6 +120,29 @@ dependencies {
 
 	// Sodium's settings API, for the Afterburner page in Sodium's menu (gui/SodiumSettingsPage). Not shipped or required.
 	modClientCompileOnly "maven.modrinth:sodium:mc1.21.1-0.8.13-fabric"
+
+	// The mixin check (src/test): loads the game's classes with every mixin applied, without starting the game.
+	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
+	testImplementation platform("org.junit:junit-bom:5.12.2")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+// The mixin check sees the client too (fabric-loader-junit starts the game's loader as a client), the bench tools and the labs.
+sourceSets.test {
+	compileClasspath += sourceSets.client.compileClasspath + sourceSets.client.output
+	runtimeClasspath += sourceSets.client.runtimeClasspath + sourceSets.client.output + sourceSets.bench.output + sourceSets.labs.output
+}
+
+test {
+	useJUnitPlatform()
+	workingDir = layout.buildDirectory.dir('mixin-check').get().asFile
+	doFirst { workingDir.mkdirs() }
+	testLogging {
+		events "failed"
+		exceptionFormat "full"
+		showStandardStreams = false
+	}
 }
 
 tasks.withType(ProcessResources).configureEach {
@@ -129,9 +169,6 @@ java {
 	targetCompatibility = JavaVersion.VERSION_21
 }
 
-// The labs and bench tools aren't ported to 1.21.1 yet: pass -Plabs to include them in the build again.
-def labsEnabled = project.hasProperty('labs')
-
 // The labs as their own jar, for test servers: build/labs/afterburner_labs-<version>.jar.
 def labsJar = tasks.register('labsJar', Jar) {
 	from sourceSets.labs.output
@@ -145,7 +182,7 @@ def benchJar = tasks.register('benchJar', Jar) {
 	destinationDirectory = layout.buildDirectory.dir('bench')
 }
 tasks.named('build') {
-	if (labsEnabled) dependsOn labsJar, benchJar
+	dependsOn labsJar, benchJar
 }
 
 jar {
@@ -153,13 +190,11 @@ jar {
 	inputs.property "projectName", projectName
 
 	// The labs ride along inside the released jar, as a nested mod Fabric loads next to Afterburner.
-	if (labsEnabled) {
-		def labsFile = labsJar.flatMap { it.archiveFileName }
-		inputs.property "labsFile", labsFile
-		from(labsJar) { into 'META-INF/jars' }
-		filesMatching('fabric.mod.json') {
-			filter { it.replace('"accessWidener"', '"jars": [{"file": "META-INF/jars/' + labsFile.get() + '"}], "accessWidener"') }
-		}
+	def labsFile = labsJar.flatMap { it.archiveFileName }
+	inputs.property "labsFile", labsFile
+	from(labsJar) { into 'META-INF/jars' }
+	filesMatching('fabric.mod.json') {
+		filter { it.replace('"accessWidener"', '"jars": [{"file": "META-INF/jars/' + labsFile.get() + '"}], "accessWidener"') }
 	}
 
 	from("LICENSE") {

@@ -10,7 +10,6 @@ import com.afterburner.bench.TickRecorder;
 import com.afterburner.client.gui.SettingsScreen;
 import com.afterburner.client.render.AnimatedSprites;
 import com.afterburner.client.render.BiomeMemo;
-import com.afterburner.client.render.BlockEntitySections;
 import com.afterburner.client.render.ChunkBatcher;
 import com.afterburner.client.render.LeafCulling;
 import com.afterburner.client.render.LightMemo;
@@ -21,11 +20,8 @@ import com.afterburner.client.render.OffscreenBuilds;
 import com.afterburner.client.render.SectionFaces;
 import com.afterburner.client.render.TranslucentCulling;
 import com.afterburner.tick.TickParking;
-import com.mojang.blaze3d.platform.FramerateLimitTracker;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.renderpearl.api.device.DeviceInfo;
+import com.mojang.blaze3d.platform.GlUtil;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.InactivityFpsLimit;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.Screen;
@@ -40,6 +36,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
+import org.lwjgl.glfw.GLFW;
 
 import org.jspecify.annotations.Nullable;
 
@@ -180,7 +177,7 @@ public final class AutoBench {
 	/** Sections waiting to build, or -1 if another renderer (Sodium) replaced vanilla's. */
 	private static int compileQueue(Minecraft mc) {
 		try {
-			return mc.levelRenderer.sectionRenderDispatcher().getCompileQueueSize();
+			return mc.levelRenderer.getSectionRenderDispatcher().getToBatchCount();
 		} catch (RuntimeException e) {
 			return -1;
 		}
@@ -190,7 +187,7 @@ public final class AutoBench {
 		switch (phase) {
 			case WAIT_WORLD -> {
 				MinecraftServer server = mc.getSingleplayerServer();
-				if (mc.level == null || mc.player == null || server == null || mc.gui.screen() != null) return;
+				if (mc.level == null || mc.player == null || server == null || mc.screen != null) return;
 				setUp(mc, server);
 				joinedAt = spinOrigin = phaseStart = lastChange = now;
 				phase = Phase.WARMUP;
@@ -230,12 +227,12 @@ public final class AutoBench {
 				// Face the starting direction for a second, take the screenshot, then measure one full circle from there.
 				look(mc, 0);
 				if (stills < STILLS && now - phaseStart > 500_000_000L) {
-					Screenshot.grab(mc.gameDirectory, "autobench-" + label + "-still" + stills + ".png", mc.gameRenderer.mainRenderTarget(), 1, m -> {
+					Screenshot.grab(mc.gameDirectory, "autobench-" + label + "-still" + stills + ".png", mc.getMainRenderTarget(), m -> {
 					});
 					stills++;
 				}
 				if (now - phaseStart > 1_000_000_000L && stills >= STILLS) {
-					Screenshot.grab(mc.gameDirectory, "autobench-" + label + ".png", mc.gameRenderer.mainRenderTarget(), 1, m -> {
+					Screenshot.grab(mc.gameDirectory, "autobench-" + label + ".png", mc.getMainRenderTarget(), m -> {
 					});
 					phase = Phase.MEASURE;
 					spinOrigin = now;
@@ -244,20 +241,7 @@ public final class AutoBench {
 					flyZ = mc.player.getZ();
 					SectionFaces.drawnQuads = SectionFaces.totalQuads = 0;
 					TranslucentCulling.drawnQuads = TranslucentCulling.totalQuads = 0;
-					ChunkBatcher.drawCalls = ChunkBatcher.sectionDraws = ChunkBatcher.builds = ChunkBatcher.patches = 0;
-					ChunkBatcher.copiedSections = ChunkBatcher.lookedUpSections = 0;
-					ChunkBatcher.rebuiltForMeshes = ChunkBatcher.rebuiltForList = ChunkBatcher.rebuiltForMoved = ChunkBatcher.rebuiltForFading = 0;
-					ChunkBatcher.rebuiltOther = ChunkBatcher.fadedInPlace = 0;
-					ChunkBatcher.swappedFrames = ChunkBatcher.swappedSections = ChunkBatcher.ignoredChanges = 0;
-					ChunkBatcher.listsTaken = ChunkBatcher.rebuiltForLeftOut = ChunkBatcher.swapChecks = ChunkBatcher.swapDifferent = 0;
-					ChunkBatcher.updateCalls = ChunkBatcher.updateNanos = ChunkBatcher.retakenSections = 0;
-					ChunkBatcher.fills = ChunkBatcher.partialFills = ChunkBatcher.drawsFilled = ChunkBatcher.drawsSeen = 0;
-					ChunkBatcher.fillChecks = ChunkBatcher.fillDifferent = 0;
-					BlockEntitySections.checks = BlockEntitySections.different = 0;
-					ChunkBatcher.listedSections = ChunkBatcher.drawnSections = 0;
-					ChunkBatcher.lockNanos = ChunkBatcher.slotBreaks = ChunkBatcher.bufferBreaks = ChunkBatcher.indexBreaks = ChunkBatcher.otherBreaks = 0;
-					for (long[] a : new long[][] {ChunkBatcher.layerDraws, ChunkBatcher.layerBatches, ChunkBatcher.layerSlots, ChunkBatcher.layerCalls,
-							ChunkBatcher.layerSingles}) java.util.Arrays.fill(a, 0);
+					ChunkBatcher.drawCalls = ChunkBatcher.sectionDraws = 0;
 					AnimatedSprites.updates = AnimatedSprites.redrawn = AnimatedSprites.skipped = 0;
 					BiomeMemo.reset();
 					BuildTimes.reset();
@@ -265,7 +249,6 @@ public final class AutoBench {
 					OcclusionRays.reset();
 					LeafCulling.reset();
 					VisibilityTimes.reset();
-					ChunkBatcher.buildNanos = ChunkBatcher.buildMaxNanos = ChunkBatcher.fillNanos = ChunkBatcher.fillMaxNanos = 0;
 					GpuTimers.reset();
 					GpuTimers.measuring = true;
 					FrameWaits.reset();
@@ -281,7 +264,7 @@ public final class AutoBench {
 					TickParking.reset();
 					serverTicks = mc.getSingleplayerServer() != null ? TickRecorder.start() : null;
 					if (command != null && mc.getConnection() != null) mc.getConnection().sendCommand(command);
-					if (f3) mc.debugEntries.setOverlayVisible(true);
+					if (f3) debugScreen(mc, true);
 					marker("measure");
 					FrameRecorder.start(seconds, run -> {
 						// Only the measured circle counts, not the pause menu after it.
@@ -311,13 +294,13 @@ public final class AutoBench {
 				if (fly > 0) fly(mc, now);
 				else spin(mc, now);
 				if (f3 && !f3Saved && now - spinOrigin > seconds * 500_000_000L) {
-					Screenshot.grab(mc.gameDirectory, "autobench-" + label + "-f3.png", mc.gameRenderer.mainRenderTarget(), 1, m -> {
+					Screenshot.grab(mc.gameDirectory, "autobench-" + label + "-f3.png", mc.getMainRenderTarget(), m -> {
 					});
 					f3Saved = true;
 				}
 				if (BuildLog.ENABLED) BuildLog.frame(now - joinedAt, mc.level.getChunkSource().getLoadedChunksCount(), !mc.levelRenderer.hasRenderedAllSections(), compileQueue(mc));
-				// A minimized window is held at 10 FPS, which would make the result meaningless.
-				if (mc.getFramerateLimitTracker().getThrottleReason() != FramerateLimitTracker.FramerateThrottleReason.NONE) throttledFrames++;
+				// Frames of a minimized window aren't shown, which would make the result meaningless.
+				if (GLFW.glfwGetWindowAttrib(mc.getWindow().getWindow(), GLFW.GLFW_ICONIFIED) != 0) throttledFrames++;
 			}
 			case PAUSED -> {
 				if (now - phaseStart > pauseSeconds * 1_000_000_000L) finish(mc, measured);
@@ -325,12 +308,12 @@ public final class AutoBench {
 			case SCREENS -> {
 				if (now - phaseStart < 2_000_000_000L) return;
 				String name = screensShown == 0 ? "video" : "afterburner";
-				Screenshot.grab(mc.gameDirectory, "autobench-" + label + "-" + name + ".png", mc.gameRenderer.mainRenderTarget(), 1, m -> {
+				Screenshot.grab(mc.gameDirectory, "autobench-" + label + "-" + name + ".png", mc.getMainRenderTarget(), m -> {
 				});
-				Afterburner.LOGGER.info("Auto benchmark: saved the {} screen ({})", name, mc.gui.screen() == null ? "none" : mc.gui.screen().getClass().getName());
+				Afterburner.LOGGER.info("Auto benchmark: saved the {} screen ({})", name, mc.screen == null ? "none" : mc.screen.getClass().getName());
 				phaseStart = now;
 				if (++screensShown == 1) {
-					mc.gui.setScreen(new SettingsScreen(mc.gui.screen(), mc.options));
+					mc.setScreen(new SettingsScreen(mc.screen, mc.options));
 				} else {
 					phase = Phase.DONE;
 					mc.stop();
@@ -355,9 +338,7 @@ public final class AutoBench {
 		mc.options.simulationDistance().set(Math.min(8, renderDistance));
 		mc.options.enableVsync().set(false);
 		mc.options.framerateLimit().set(260);
-		// Nobody touches the keyboard during a benchmark, so the game would otherwise drop to 30 FPS after a minute.
-		mc.options.inactivityFpsLimit().set(InactivityFpsLimit.MINIMIZED);
-		mc.debugEntries.setOverlayVisible(false);
+		debugScreen(mc, false);
 		server.execute(() -> {
 			var commands = server.getCommands();
 			var source = server.createCommandSourceStack().withSuppressedOutput();
@@ -368,7 +349,7 @@ public final class AutoBench {
 			for (ServerPlayer p : server.getPlayerList().getPlayers()) {
 				// The world's spawn point, not where the player landed: new players land somewhere random around it, so every run
 				// (and every mod compared) would see a different scene.
-				BlockPos at = server.getRespawnData().pos().offset(offsetX, 0, offsetZ);
+				BlockPos at = server.overworld().getSharedSpawnPos().offset(offsetX, 0, offsetZ);
 				if (biome != null) at = inBiome((ServerLevel) p.level(), at, biome);
 				// Loaded first: the height of a chunk that isn't would be the bottom of the world.
 				p.level().getChunk(at.getX() >> 4, at.getZ() >> 4);
@@ -378,6 +359,10 @@ public final class AutoBench {
 				p.onUpdateAbilities();
 			}
 		});
+	}
+
+	private static void debugScreen(Minecraft mc, boolean visible) {
+		if (mc.getDebugOverlay().showDebugScreen() != visible) mc.getDebugOverlay().toggleOverlay();
 	}
 
 	/**
@@ -425,7 +410,7 @@ public final class AutoBench {
 	private void fly(Minecraft mc, long now) {
 		if (mc.player == null) return;
 		mc.player.setDeltaMovement(Vec3.ZERO);
-		mc.player.snapTo(flyX, flyY, flyZ + (now - spinOrigin) / 1e9 * fly, 0, pitch);
+		mc.player.moveTo(flyX, flyY, flyZ + (now - spinOrigin) / 1e9 * fly, 0, pitch);
 	}
 
 	private void look(Minecraft mc, float yaw) {
@@ -453,7 +438,6 @@ public final class AutoBench {
 			return;
 		}
 		Stats f = Stats.of(run.frames());
-		DeviceInfo gpu = RenderSystem.getDevice().getDeviceInfo();
 		double fps = f.count() / (f.totalMs() / 1000);
 		double ready = (readyAt - joinedAt) / 1e9;
 		List<String> lines = new ArrayList<>();
@@ -464,15 +448,17 @@ public final class AutoBench {
 		lines.add("Frame time avg " + Reports.f2(f.avgMs()) + " ms | 99% " + Reports.f2(f.p99Ms()) + " | max " + Reports.f2(f.maxMs())
 				+ " | stutters over 50 ms: " + f.over50Ms());
 		lines.add("All chunks loaded and built " + Reports.f1(ready) + " s after joining (" + circles + " circles of warmup), "
-				+ mc.level.getChunkSource().getLoadedChunksCount() + " chunks, " + mc.levelRenderer.visibleSections().size()
-				+ " sections visible at the end");
+				+ mc.level.getChunkSource().getLoadedChunksCount() + " chunks, " + mc.levelRenderer.countRenderedSections()
+				+ " sections drawn at the end");
 		if (serverTickTimes != null && serverTickTimes.length > 0) {
 			for (String line : TickCommand.tickLines(Stats.of(serverTickTimes), serverTps)) lines.add("Server " + line);
 		}
 		if (Features.PARKED_TICKS.enabled()) lines.add(TickParking.summary());
-		boolean mdi = mc.levelRenderer.isChunkRenderingUsingMultiDrawIndirect();
+		// 1.21.1 draws terrain without multi-draw indirect.
+		boolean mdi = false;
 		double skipped = SectionFaces.totalQuads == 0 ? 0 : 100.0 * (1 - (double) SectionFaces.drawnQuads / SectionFaces.totalQuads);
-		lines.add("GPU: " + gpu.name() + " (" + gpu.backendName() + (mdi ? ", multi-draw" : ", separate draws") + "), " + Reports.modsLine());
+		lines.add("GPU: " + GlUtil.getRenderer() + " (OpenGL " + GlUtil.getOpenGLVersion() + (ChunkBatcher.ENABLED ? ", batched draws" : ", separate draws") + "), "
+				+ Reports.modsLine());
 		if (ignoredInput > 0) lines.add("Ignored " + ignoredInput + " key presses and clicks during the run (the window had focus)");
 		if (throttledFrames > 0) lines.add("WARNING: " + throttledFrames + " frames were slowed down by the game (window minimized?), the result is not valid");
 		if (SectionFaces.totalQuads > 0) lines.add("Face culling left out " + Reports.f1(skipped) + "% of opaque quads");
@@ -480,51 +466,13 @@ public final class AutoBench {
 				+ Reports.f1(100.0 * (1 - (double) TranslucentCulling.drawnQuads / TranslucentCulling.totalQuads)) + "% of water, glass and ice quads");
 		if (OcclusionCulling.testedSections > 0) lines.add("Occlusion culling: " + Reports.f1(100.0 * OcclusionCulling.hiddenSections / OcclusionCulling.testedSections)
 				+ "% of sections hidden behind nearer terrain (" + OcclusionCulling.testedFrames + " frames tested), " + Reports.f0((double) OcclusionCulling.leftOutSections / f.count())
-				+ " sections held back or left out per frame, " + Reports.f0((double) OcclusionCulling.lateCommands / f.count()) + " held-back draws per frame");
+				+ " sections left out per frame");
 		if (OcclusionCulling.testedObjects > 0) lines.add("Entity culling: " + Reports.f1(100.0 * OcclusionCulling.hiddenObjects / OcclusionCulling.testedObjects)
 				+ "% of entity and block entity tests hidden, left out per frame: " + Reports.f1((double) EntityCulling.culledEntities / f.count())
 				+ " entities, " + Reports.f1((double) EntityCulling.culledBlockEntities / f.count()) + " block entities");
 		if (OffscreenBuilds.built > 0) lines.add("Off-screen chunk building: " + OffscreenBuilds.built + " sections built before they were on screen");
 		if (ChunkBatcher.drawCalls > 0) lines.add("Chunk batching: " + Reports.f0((double) ChunkBatcher.drawCalls / f.count()) + " draw calls per frame for "
-				+ Reports.f0((double) ChunkBatcher.sectionDraws / f.count()) + " section draws, built anew in "
-				+ Reports.f0(100.0 * ChunkBatcher.builds / f.count()) + "% of frames (copying " + Reports.f0(100.0 * ChunkBatcher.copiedSections
-				/ Math.max(1, ChunkBatcher.copiedSections + ChunkBatcher.lookedUpSections)) + "% of sections from the frame before), patched in "
-				+ Reports.f0(100.0 * ChunkBatcher.patches / f.count()) + "% (" + Reports.f1((double) ChunkBatcher.retakenSections / f.count())
-				+ " sections per frame taken in again), fading kept in place in " + Reports.f0(100.0 * ChunkBatcher.fadedInPlace / f.count())
-				+ "%, new meshes swapped in in " + Reports.f0(100.0 * ChunkBatcher.swappedFrames / f.count()) + "% ("
-				+ Reports.f1((double) ChunkBatcher.swappedSections / Math.max(1, ChunkBatcher.swappedFrames)) + " sections each), new lists taken in place in "
-				+ Reports.f0(100.0 * ChunkBatcher.listsTaken / f.count()) + "% (updates in place " + Reports.f2(ChunkBatcher.updateNanos / 1e6 / Math.max(1, ChunkBatcher.updateCalls))
-				+ " ms each), "
-				+ Reports.f1((double) ChunkBatcher.ignoredChanges / f.count()) + " changes per frame outside the list left alone"
-				+ (ChunkBatcher.swapChecks > 0 ? " (check: " + ChunkBatcher.swapChecks + " compared, " + ChunkBatcher.swapDifferent + " different)" : "")
-				+ "; built anew for other mesh changes " + Reports.f0(100.0 * ChunkBatcher.rebuiltForMeshes / f.count()) + "%, another list "
-				+ Reports.f0(100.0 * ChunkBatcher.rebuiltForList / f.count()) + "%, moved meshes " + Reports.f0(100.0 * ChunkBatcher.rebuiltForMoved / f.count())
-				+ "%, fading " + Reports.f0(100.0 * ChunkBatcher.rebuiltForFading / f.count()) + "%, too much left out " + Reports.f0(100.0 * ChunkBatcher.rebuiltForLeftOut / f.count())
-				+ "%, other " + Reports.f0(100.0 * ChunkBatcher.rebuiltOther / f.count()) + "%"
-				+ " | build " + Reports.f2(ChunkBatcher.buildNanos / 1e6 / Math.max(1, ChunkBatcher.builds)) + " ms each (max " + Reports.f2(ChunkBatcher.buildMaxNanos / 1e6)
-				+ "), fill " + Reports.f2(ChunkBatcher.fillNanos / 1e6 / f.count()) + " ms per frame (max " + Reports.f2(ChunkBatcher.fillMaxNanos / 1e6) + "; "
-				+ Reports.f0(100.0 * ChunkBatcher.partialFills / Math.max(1, ChunkBatcher.fills)) + "% of fills left batches as they were, "
-				+ Reports.f0(100.0 * ChunkBatcher.drawsFilled / Math.max(1, ChunkBatcher.drawsSeen)) + "% of draws filled"
-				+ (ChunkBatcher.fillChecks > 0 ? ", check: " + ChunkBatcher.fillChecks + " compared, " + ChunkBatcher.fillDifferent + " different" : "") + ")"
-				+ (BlockEntitySections.checks > 0 ? ", block entity sections check: " + BlockEntitySections.checks + " compared, " + BlockEntitySections.different
-				+ " different" : ""));
-		if (ChunkBatcher.builds > 0) {
-			StringBuilder b = new StringBuilder("Chunk batching per build: " + Reports.f0((double) ChunkBatcher.listedSections / ChunkBatcher.builds) + " sections listed, "
-					+ Reports.f0((double) ChunkBatcher.drawnSections / ChunkBatcher.builds) + " with draws;");
-			for (net.minecraft.client.renderer.chunk.ChunkSectionLayer layer : net.minecraft.client.renderer.chunk.ChunkSectionLayer.values()) {
-				int l = layer.ordinal();
-				b.append(" ").append(layer.name().toLowerCase()).append(" ").append(Reports.f0((double) ChunkBatcher.layerDraws[l] / ChunkBatcher.builds)).append(" draws, ")
-						.append(Reports.f0((double) ChunkBatcher.layerBatches[l] / ChunkBatcher.builds)).append(" batches, ")
-						.append(Reports.f0((double) ChunkBatcher.layerSlots[l] / ChunkBatcher.builds)).append(" slots, calls per frame ")
-						.append(Reports.f0((double) ChunkBatcher.layerCalls[l] / f.count())).append(" (").append(Reports.f0((double) ChunkBatcher.layerSingles[l] / f.count()))
-						.append(" single);");
-			}
-			b.append(" lock waits ").append(Reports.f2(ChunkBatcher.lockNanos / 1e6 / ChunkBatcher.builds)).append(" ms per build; ordered batches ended by another slot ")
-					.append(Reports.f0((double) ChunkBatcher.slotBreaks / ChunkBatcher.builds)).append(", by other vertex buffers ").append(Reports.f0((double) ChunkBatcher.bufferBreaks / ChunkBatcher.builds))
-					.append(", index buffers ").append(Reports.f0((double) ChunkBatcher.indexBreaks / ChunkBatcher.builds))
-					.append(", else ").append(Reports.f0((double) ChunkBatcher.otherBreaks / ChunkBatcher.builds));
-			lines.add(b.toString());
-		}
+				+ Reports.f0((double) ChunkBatcher.sectionDraws / f.count()) + " section draws");
 		if (AnimatedSprites.updates > 0) lines.add("Visible-only animations: per update " + Reports.f1((double) AnimatedSprites.redrawn / AnimatedSprites.updates)
 				+ " block textures redrawn, " + Reports.f1((double) AnimatedSprites.skipped / AnimatedSprites.updates) + " left out (" + AnimatedSprites.updates + " updates)");
 		lines.add(BuildTimes.line());
@@ -556,7 +504,7 @@ public final class AutoBench {
 		if (SCREENS && quit) {
 			phase = Phase.SCREENS;
 			phaseStart = System.nanoTime();
-			mc.gui.setScreen(videoSettings(mc));
+			mc.setScreen(videoSettings(mc));
 			return;
 		}
 		if (quit) mc.stop();

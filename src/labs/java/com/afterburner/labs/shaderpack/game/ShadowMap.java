@@ -1,50 +1,45 @@
 package com.afterburner.labs.shaderpack.game;
 
+import com.afterburner.client.mixin.render.ViewAreaAccessor;
 import com.afterburner.client.render.ChunkBatcher;
-import com.afterburner.labs.shaderpack.PackUniforms;
+import com.afterburner.labs.mixin.shader.LevelRendererAccessor;
 import com.afterburner.labs.shaderpack.PackLoader;
+import com.afterburner.labs.shaderpack.PackUniforms;
 import com.afterburner.labs.shaderpack.TranslateTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.buffers.GpuBuffer;
-import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
-import com.mojang.renderpearl.api.commands.CommandEncoder;
-import com.mojang.renderpearl.api.commands.RenderPass;
-import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
-import com.mojang.renderpearl.api.device.GpuDevice;
-import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
-import com.mojang.renderpearl.api.textures.FilterMode;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
+import com.mojang.blaze3d.vertex.PoseStack;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.Consumer;
+import net.minecraft.client.Camera;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ViewArea;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
-import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
-import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.TickRateManager;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
+import org.joml.Matrix4fStack;
 import org.joml.Matrix4fc;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
-import org.joml.Vector4fc;
 import org.jspecify.annotations.Nullable;
-import org.lwjgl.system.MemoryUtil;
 
 /**
  * The shadow map: the terrain as the sun (or moon) sees it, drawn at the start of a frame with the pack's shadow programs, or kept
@@ -54,12 +49,11 @@ import org.lwjgl.system.MemoryUtil;
  * <p>
  * The chunk batcher draws the solid and cutout sections inside the shadow's box (shadowDistance either side, 256 blocks
  * deep), and those in the pack's voxel volume around the camera (its 3D images, which packs fill from the shadow pass: colored
- * lighting) wherever the sun is. Entities are drawn in every frame, over the terrain, into both depths ({@link #renderEntities}).
+ * lighting) wherever the sun is. Entities near enough are drawn in every frame, over the terrain, into both depths
+ * ({@link #renderEntities}), with the camera's view (TranslateTarget#SHADOW_FROM_VIEW turns it into the sun's).
  */
 final class ShadowMap implements AutoCloseable {
 	static final int COLORS = 2;
-	private static final int USAGE = GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_DST
-		| GpuTexture.USAGE_COPY_SRC;
 	/** How far the camera may move, in blocks, before the sections are picked again; they're picked from a box that much bigger. */
 	private static final double MOVE = 4.0;
 	/** How much the sun may turn (in the view's rotation, about radians) before the sections are picked again. */
@@ -79,7 +73,7 @@ final class ShadowMap implements AutoCloseable {
 		"gbufferModelView", "gbufferModelViewInverse", "gbufferProjection", "gbufferProjectionInverse", "gbufferPreviousModelView",
 		"gbufferPreviousProjection", "shadowModelView", "shadowModelViewInverse", "shadowProjection", "shadowProjectionInverse",
 		"sunPosition", "moonPosition", "shadowLightPosition", "upPosition", "endFlashPosition", "sunAngle", "shadowAngle", "worldDay",
-		"skyColor", "fogColor");
+		"skyColor", "fogColor", TranslateTarget.SHADOW_FROM_VIEW, TranslateTarget.SHADOW_PROJECTION);
 	final int resolution;
 	private final float distance;
 	private final float interval;
@@ -87,22 +81,21 @@ final class ShadowMap implements AutoCloseable {
 	private final double entityRange;
 	/** The pack's voxel volume (its biggest 3D image), in blocks around the camera, or null without one. */
 	private final int @Nullable [] volume;
-	/** The shadowcolor buffers the shadow programs draw, as the pass's color attachments. */
+	/** The shadowcolor buffers the shadow programs draw, as the framebuffer's color attachments. */
 	private final int[] buffers;
-	private final GpuFormat[] formats = new GpuFormat[COLORS];
+	private final Gl.Format[] formats = new Gl.Format[COLORS];
 	private final boolean[] clear = new boolean[COLORS];
 	private final Vector4f[] clearColors = new Vector4f[COLORS];
-	private final List<GpuTexture> textures = new ArrayList<>();
-	private final List<GpuTextureView> views = new ArrayList<>();
-	private final GpuTexture depth;
-	private final GpuTextureView depthView;
-	/** shadowtex1, the depth before water and glass are drawn, or null when they aren't drawn (shadowTranslucent=false). */
-	private final @Nullable GpuTexture depthSolid;
-	private final @Nullable GpuTextureView depthSolidView;
-	private final @Nullable GpuTextureView[] colorViews = new GpuTextureView[COLORS];
-	/** The shadow's projection as the game's Projection block. */
-	private final GpuBuffer projection;
-	private final ByteBuffer projectionData = MemoryUtil.memAlloc(64);
+	private final List<Integer> textures = new ArrayList<>();
+	private final int depth;
+	/** shadowtex1, the depth before water and glass are drawn, or 0 when they aren't drawn (shadowTranslucent=false). */
+	private final int depthSolid;
+	private final int[] colors = new int[COLORS];
+	/** The map, and the same with shadowtex1 for its depth (entities drawn again there, depth alone). */
+	private final Gl.Framebuffer framebuffer;
+	private final Gl.@Nullable Framebuffer solidFramebuffer;
+	/** What's drawn into the map now, or null. */
+	private PackPass.@Nullable Kind drawing;
 
 	/** The sections picked last, and what for. */
 	private final ObjectArrayList<SectionRenderDispatcher.RenderSection> sections = new ObjectArrayList<>();
@@ -113,8 +106,8 @@ final class ShadowMap implements AutoCloseable {
 	private long pickedSection;
 	private double pickedX, pickedY, pickedZ;
 
-	/** This frame's sections are picked and their draws prepared ({@link #holds}), and whether there's anything to draw. */
-	private boolean prepared, any;
+	/** This frame's sections are picked ({@link #holds}), whether there's anything to draw, and in water or glass. */
+	private boolean prepared, any, anyTranslucent;
 	private long contents;
 	/** The pack's images the shadow programs write: kept with the map. */
 	private final Set<String> written = new HashSet<>();
@@ -135,12 +128,12 @@ final class ShadowMap implements AutoCloseable {
 	private boolean drawnEachFrame;
 	/**
 	 * The map with the terrain alone, which a kept map goes back to before the frame's entities are drawn in: its depth and the
-	 * shadowcolor buffers drawn, each beside its copy.
+	 * shadowcolor buffers drawn, each beside its copy (with whether it's a depth).
 	 */
-	private final List<GpuTexture[]> terrainCopies = new ArrayList<>();
+	private final List<int[]> terrainCopies = new ArrayList<>();
 	/** The map with the solid blocks alone, which a map {@link #refreshes refreshed} goes back to: the same, each beside its copy. */
-	private final List<GpuTexture[]> solidCopies = new ArrayList<>();
-	/** Whether {@link #terrainDepth} holds the terrain as last drawn, and whether entities are drawn in the map. */
+	private final List<int[]> solidCopies = new ArrayList<>();
+	/** Whether the copies hold the terrain as last drawn, and whether entities are drawn in the map. */
 	private boolean terrainSaved, entitiesDrawn;
 	/** Whether the terrain drawn last had water or glass in it. */
 	private boolean translucentsDrawn;
@@ -173,35 +166,40 @@ final class ShadowMap implements AutoCloseable {
 			else if (!followed.contains(name) && !this.written.contains(name)) this.watched.add(name);
 		}
 		this.animated = animated;
-		// A pass needs somewhere to draw even if the programs only write depth.
+		// Somewhere to draw even if the programs only write depth.
 		if (drawn.isEmpty()) drawn.add(0);
 		this.buffers = drawn.stream().mapToInt(Integer::intValue).toArray();
 
-		GpuDevice device = RenderSystem.getDevice();
-		CommandEncoder encoder = device.createCommandEncoder();
-		this.depth = device.createTexture("Afterburner shadowtex", USAGE, GpuFormat.D32_FLOAT, this.resolution, this.resolution, 1, 1);
-		this.depthView = this.keep(this.depth);
-		encoder.clearDepthTexture(this.depth, 1.0);
+		this.depth = this.keep(Gl.texture(Gl.Format.DEPTH, this.resolution, this.resolution, true, false));
+		Gl.clearDepth(this.depth, 1.0F);
 		if (pack.properties.getBoolean("shadowTranslucent", true)) {
-			this.depthSolid = device.createTexture("Afterburner shadowtex1", USAGE, GpuFormat.D32_FLOAT, this.resolution, this.resolution, 1, 1);
-			this.depthSolidView = this.keep(this.depthSolid);
-			encoder.clearDepthTexture(this.depthSolid, 1.0);
+			this.depthSolid = this.keep(Gl.texture(Gl.Format.DEPTH, this.resolution, this.resolution, true, false));
+			Gl.clearDepth(this.depthSolid, 1.0F);
 		} else {
-			this.depthSolid = null;
-			this.depthSolidView = null;
+			this.depthSolid = 0;
 		}
 		for (int b : this.buffers) {
 			String format = setting(pack.consts, b, "Format");
-			this.formats[b] = format == null ? GpuFormat.RGBA8_UNORM : PackTargets.format(format);
+			this.formats[b] = format == null ? Gl.Format.RGBA8 : Gl.format(format);
 			this.clear[b] = !"false".equals(setting(pack.consts, b, "Clear"));
 			String color = setting(pack.consts, b, "ClearColor");
 			this.clearColors[b] = color != null ? PackTargets.vec4(color) : new Vector4f(1, 1, 1, 1);
-			GpuTexture t = device.createTexture("Afterburner shadowcolor" + b, USAGE, this.formats[b], this.resolution, this.resolution, 1, 1);
-			this.colorViews[b] = this.keep(t);
+			this.colors[b] = this.keep(Gl.texture(this.formats[b], this.resolution, this.resolution, false, false));
 			// Those not cleared every frame start out cleared.
-			encoder.clearColorTexture(t, this.clearColors[b]);
+			Vector4f c = this.clearColors[b];
+			Gl.clear(this.colors[b], this.formats[b], c.x, c.y, c.z, c.w);
 		}
-		this.projection = device.createBuffer(() -> "Afterburner shadow projection", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, 64);
+		int bound = Gl.drawFramebuffer();
+		this.framebuffer = new Gl.Framebuffer().bind();
+		for (int i = 0; i < this.buffers.length; i++) this.framebuffer.color(i, this.colors[this.buffers[i]]);
+		this.framebuffer.depth(this.depth).drawBuffers(Gl.all(this.buffers.length));
+		if (this.depthSolid != 0) {
+			this.solidFramebuffer = new Gl.Framebuffer().bind();
+			this.solidFramebuffer.depth(this.depthSolid).drawBuffers(new int[0]);
+		} else {
+			this.solidFramebuffer = null;
+		}
+		Gl.bindFramebuffer(bound);
 	}
 
 	/** shadowcolor0's settings may also be named shadowcolor's. */
@@ -211,33 +209,31 @@ final class ShadowMap implements AutoCloseable {
 		return value;
 	}
 
-	private GpuTextureView keep(GpuTexture t) {
-		GpuTextureView view = RenderSystem.getDevice().createTextureView(t);
-		this.textures.add(t);
-		this.views.add(view);
-		return view;
+	private int keep(int texture) {
+		this.textures.add(texture);
+		return texture;
 	}
 
 	int[] buffers() {
 		return this.buffers;
 	}
 
-	GpuFormat format(int buffer) {
+	Gl.Format format(int buffer) {
 		return this.formats[buffer];
 	}
 
-	GpuTextureView depth() {
-		return this.depthView;
+	int depth() {
+		return this.depth;
 	}
 
 	/** shadowtex1: the depth without water and glass. */
-	GpuTextureView depthNoTranslucents() {
-		return this.depthSolidView != null ? this.depthSolidView : this.depthView;
+	int depthNoTranslucents() {
+		return this.depthSolid != 0 ? this.depthSolid : this.depth;
 	}
 
-	/** A shadowcolor buffer, or null if the shadow programs don't draw it. */
-	@Nullable GpuTextureView color(int buffer) {
-		return buffer >= 0 && buffer < COLORS ? this.colorViews[buffer] : null;
+	/** A shadowcolor buffer, or 0 if the shadow programs don't draw it. */
+	int color(int buffer) {
+		return buffer >= 0 && buffer < COLORS ? this.colors[buffer] : 0;
 	}
 
 	/** The pack's images the shadow programs write, which a kept map keeps (they aren't cleared). */
@@ -245,19 +241,31 @@ final class ShadowMap implements AutoCloseable {
 		return this.written;
 	}
 
+	/** What's drawn into the map now if {@code framebuffer} (the one drawn into) is its, else null. */
+	PackPass.@Nullable Kind drawing(int framebuffer) {
+		PackPass.Kind kind = this.drawing;
+		if (kind == null) return null;
+		Gl.Framebuffer own = kind == PackPass.Kind.SHADOW_DEPTH ? this.solidFramebuffer : this.framebuffer;
+		return own != null && own.id == framebuffer ? kind : null;
+	}
+
+	/** Points the outputs of the program drawing into the map now at its attachments (it's bound); the depth-only one has none. */
+	void drawBuffers(PackPass.Kind kind, int[] attachments) {
+		if (kind != PackPass.Kind.SHADOW_DEPTH) this.framebuffer.drawBuffers(attachments);
+	}
+
 	/**
 	 * Whether the map drawn before still shows this frame's shadows, so it needn't be drawn again: the same terrain in it, the
 	 * sun at the same step, the camera in the same shadowIntervalSize cell (the same block, if the programs write images, which
-	 * packs fill around the camera's block) and the same values of what else the programs read. Picks and prepares this frame's
-	 * draws either way. Asked before the pack's images are cleared.
+	 * packs fill around the camera's block) and the same values of what else the programs read. Picks this frame's sections
+	 * either way. Asked before the pack's images are cleared.
 	 */
 	boolean holds(Minecraft mc, FrameUniforms frame, PackUniforms.Inputs inputs) {
 		this.prepared = false;
-		ViewArea area = mc.levelRenderer.viewArea();
-		SectionRenderDispatcher dispatcher = mc.levelRenderer.sectionRenderDispatcher();
-		if (!frame.hasShadow || area == null || dispatcher == null) return false;
-		Vec3 camera = mc.gameRenderer.mainCamera().position();
-		this.prepare(area, dispatcher, camera, frame);
+		ViewArea area = ((LevelRendererAccessor) mc.levelRenderer).afterburner$viewArea();
+		if (!frame.hasShadow || area == null || mc.level == null) return false;
+		Vec3 camera = mc.gameRenderer.getMainCamera().getPosition();
+		this.prepare(area, mc.level, camera, frame);
 		Shaderpacks.ShadowUpdates mode = Shaderpacks.shadowUpdates();
 		if (!this.valid || mode == Shaderpacks.ShadowUpdates.EVERY_FRAME || mode != this.drawnMode || this.contents != this.drawnContents) {
 			return false;
@@ -307,9 +315,9 @@ final class ShadowMap implements AutoCloseable {
 	}
 
 	/** The map drawn before is used again this frame ({@link #holds}): as it is, or drawn again but for the solid blocks. */
-	void keep(Minecraft mc, FrameUniforms frame, Consumer<RenderPass> bind) {
+	void keep(Minecraft mc, FrameUniforms frame) {
 		this.prepared = false;
-		if (this.refreshes(this.drawnMode) && !this.solidCopies.isEmpty()) this.draw(mc, frame, bind, false);
+		if (this.refreshes(this.drawnMode) && !this.solidCopies.isEmpty()) this.draw(mc, frame, false);
 	}
 
 	/** Something wasn't drawn into the map (a shadow program still compiling): draw it again next frame. */
@@ -317,11 +325,23 @@ final class ShadowMap implements AutoCloseable {
 		this.valid = false;
 	}
 
-	private void prepare(ViewArea area, SectionRenderDispatcher dispatcher, Vec3 camera, FrameUniforms frame) {
-		this.pick(area, camera, frame.shadowView);
-		ChunkBatcher.ShadowFrame draws = ChunkBatcher.shadowFrame();
-		this.any = draws.prepare(this.sections, dispatcher);
-		this.contents = draws.contents();
+	/** Picks the sections, and sums up what they hold now: drawn again when that changes. */
+	private void prepare(ViewArea area, ClientLevel level, Vec3 camera, FrameUniforms frame) {
+		this.pick(area, level, camera, frame.shadowView);
+		long contents = this.sections.size();
+		boolean any = false, translucent = false;
+		for (SectionRenderDispatcher.RenderSection section : this.sections) {
+			SectionRenderDispatcher.CompiledSection compiled = section.getCompiled();
+			// A section built again gets a new CompiledSection.
+			contents = contents * 31 + System.identityHashCode(compiled);
+			contents = contents * 31 + section.getOrigin().asLong();
+			if (compiled.hasNoRenderableLayers()) continue;
+			any = true;
+			translucent |= !compiled.isEmpty(RenderType.translucent()) || !compiled.isEmpty(RenderType.tripwire());
+		}
+		this.contents = contents;
+		this.any = any;
+		this.anyTranslucent = translucent;
 		this.prepared = true;
 	}
 
@@ -345,174 +365,217 @@ final class ShadowMap implements AutoCloseable {
 		}
 	}
 
-	/**
-	 * Draws this frame's shadow map, before anything else is drawn: the terrain inside the shadow's box. {@code bind} binds the
-	 * pack's uniforms and textures in the pass.
-	 */
-	void render(Minecraft mc, FrameUniforms frame, PackUniforms.Inputs inputs, Consumer<RenderPass> bind) {
-		ViewArea area = mc.levelRenderer.viewArea();
-		SectionRenderDispatcher dispatcher = mc.levelRenderer.sectionRenderDispatcher();
-		if (!frame.hasShadow || area == null || dispatcher == null) {
+	/** Draws this frame's shadow map, before anything else is drawn: the terrain inside the shadow's box. */
+	void render(Minecraft mc, FrameUniforms frame, PackUniforms.Inputs inputs) {
+		ViewArea area = ((LevelRendererAccessor) mc.levelRenderer).afterburner$viewArea();
+		if (!frame.hasShadow || area == null || mc.level == null) {
 			this.valid = false;
 			return;
 		}
-		Vec3 camera = mc.gameRenderer.mainCamera().position();
-		if (!this.prepared) this.prepare(area, dispatcher, camera, frame);
+		Vec3 camera = mc.gameRenderer.getMainCamera().getPosition();
+		if (!this.prepared) this.prepare(area, mc.level, camera, frame);
 		this.prepared = false;
 		this.remember(camera, frame, inputs);
-		this.draw(mc, frame, bind, true);
+		this.draw(mc, frame, true);
 	}
 
 	/**
 	 * Draws the terrain into the map: in {@code full}, or over the solid blocks kept from when it was (the map
 	 * {@link #refreshes}), which then get their copy.
 	 */
-	private void draw(Minecraft mc, FrameUniforms frame, Consumer<RenderPass> bind, boolean full) {
+	private void draw(Minecraft mc, FrameUniforms frame, boolean full) {
 		this.terrainSaved = false;
 		this.entitiesDrawn = false;
 		boolean split = this.refreshes(this.drawnMode);
 		this.drawnEachFrame = split || this.drawnMode == Shaderpacks.ShadowUpdates.EVERY_FRAME;
-		ChunkBatcher.ShadowFrame draws = ChunkBatcher.shadowFrame();
-		boolean any = this.any;
-		draws.upload();
-
-		// Everything the pass reads is written before it's opened.
-		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-		frame.shadowProjection.get(0, this.projectionData);
-		encoder.writeToBuffer(this.projection.slice(), this.projectionData);
-		GpuTextureView atlas = mc.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
-		GpuBufferSlice terrain = RenderSystem.getDynamicUniforms().writeTerrainTransform(frame.shadowView, atlas.getWidth(0), atlas.getHeight(0));
-		RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
-
-		RenderPass.RenderArea bounds = new RenderPass.RenderArea(0, 0, this.resolution, this.resolution);
-		GpuBuffer indexBuffer = indices.getBuffer();
-		boolean drawing = any && indexBuffer != null;
-		if (any && indexBuffer == null) this.valid = false;
-		List<RenderPassDescriptor.@Nullable Attachment<Optional<Vector4fc>>> kept = new ArrayList<>();
-		for (int b : this.buffers) kept.add(new RenderPassDescriptor.Attachment<>(this.colorViews[b], Optional.empty()));
+		Vec3 camera = mc.gameRenderer.getMainCamera().getPosition();
 		if (full) {
-			List<RenderPassDescriptor.@Nullable Attachment<Optional<Vector4fc>>> colors = new ArrayList<>();
+			Gl.clearDepth(this.depth, 1.0F);
 			for (int b : this.buffers) {
-				colors.add(new RenderPassDescriptor.Attachment<>(this.colorViews[b], this.clear[b] ? Optional.of(this.clearColors[b]) : Optional.empty()));
+				Vector4f c = this.clearColors[b];
+				if (this.clear[b]) Gl.clear(this.colors[b], this.formats[b], c.x, c.y, c.z, c.w);
 			}
-			RenderPassDescriptor descriptor = new RenderPassDescriptor(() -> "Afterburner shadow map", colors,
-				new RenderPassDescriptor.Attachment<>(this.depthView, OptionalDouble.of(1.0)), bounds);
-			try (RenderPass pass = encoder.createRenderPass(descriptor)) {
-				if (drawing) {
-					this.begin(pass, mc, terrain, atlas, bind);
-					for (ChunkSectionLayer layer : ChunkSectionLayer.values()) {
-						if (!layer.translucent() && (!split || layer == ChunkSectionLayer.SOLID)) draws.draw(layer, pass, indexBuffer, indices.type());
-					}
-				}
-			}
+			if (this.any) this.drawLayers(frame, camera, split ? Layers.SOLID : Layers.OPAQUE);
 			if (split) {
-				if (this.solidCopies.isEmpty()) {
-					this.solidCopies.add(this.copyOf(this.depth));
-					for (int b : this.buffers) this.solidCopies.add(this.copyOf(this.colorViews[b].texture()));
-				}
-				for (GpuTexture[] c : this.solidCopies) encoder.copyTextureToTexture(c[0], c[1], 0, 0, 0, 0, 0, this.resolution, this.resolution);
+				if (this.solidCopies.isEmpty()) this.copies(this.solidCopies, false);
+				for (int[] c : this.solidCopies) Gl.copy(c[0], c[1], this.resolution, this.resolution, c[2] != 0);
 			}
 		} else {
-			for (GpuTexture[] c : this.solidCopies) encoder.copyTextureToTexture(c[1], c[0], 0, 0, 0, 0, 0, this.resolution, this.resolution);
+			for (int[] c : this.solidCopies) Gl.copy(c[1], c[0], this.resolution, this.resolution, c[2] != 0);
 		}
 		// Over the solid blocks kept, the rest of what isn't see-through (leaves, grass): this frame's waving.
-		if (split && drawing) {
-			RenderPassDescriptor cutouts = new RenderPassDescriptor(() -> "Afterburner shadow map cutouts", kept,
-				new RenderPassDescriptor.Attachment<>(this.depthView, OptionalDouble.empty()), bounds);
-			try (RenderPass pass = encoder.createRenderPass(cutouts)) {
-				this.begin(pass, mc, terrain, atlas, bind);
-				for (ChunkSectionLayer layer : ChunkSectionLayer.values()) {
-					if (!layer.translucent() && layer != ChunkSectionLayer.SOLID) draws.draw(layer, pass, indexBuffer, indices.type());
-				}
-			}
-		}
+		if (split && this.any) this.drawLayers(frame, camera, Layers.CUTOUTS);
 		// Water and glass go in after shadowtex1 got the map without them.
 		this.translucentsDrawn = false;
-		if (this.depthSolid == null) return;
-		encoder.copyTextureToTexture(this.depth, this.depthSolid, 0, 0, 0, 0, 0, this.resolution, this.resolution);
-		if (!drawing || !draws.hasTranslucent()) return;
-		RenderPassDescriptor translucents = new RenderPassDescriptor(() -> "Afterburner shadow map translucents", kept,
-			new RenderPassDescriptor.Attachment<>(this.depthView, OptionalDouble.empty()), bounds);
-		try (RenderPass pass = encoder.createRenderPass(translucents)) {
-			this.begin(pass, mc, terrain, atlas, bind);
-			for (ChunkSectionLayer layer : ChunkSectionLayer.values()) {
-				if (layer.translucent()) draws.draw(layer, pass, indexBuffer, indices.type());
-			}
-		}
+		if (this.depthSolid == 0) return;
+		Gl.copy(this.depth, this.depthSolid, this.resolution, this.resolution, true);
+		if (!this.any || !this.anyTranslucent) return;
+		this.drawLayers(frame, camera, Layers.TRANSLUCENT);
 		this.translucentsDrawn = true;
 	}
 
-	/** Sets up a pass drawing the terrain into the map. */
-	private void begin(RenderPass pass, Minecraft mc, GpuBufferSlice terrain, GpuTextureView atlas, Consumer<RenderPass> bind) {
-		((PackPass) pass).afterburner$setPackKind(PackPass.Kind.SHADOW);
-		RenderSystem.bindDefaultUniforms(pass);
-		pass.setUniform("Projection", this.projection);
-		pass.setUniform("TerrainUniform", terrain);
-		bind.accept(pass);
-		pass.setUniform("Sampler0", atlas, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-		pass.setUniform("Sampler2", mc.gameRenderer.lightmap(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
+	private enum Layers {
+		SOLID, CUTOUTS, OPAQUE, TRANSLUCENT;
+
+		boolean has(RenderType type) {
+			boolean translucent = type == RenderType.translucent() || type == RenderType.tripwire();
+			return switch (this) {
+				case SOLID -> type == RenderType.solid();
+				case CUTOUTS -> !translucent && type != RenderType.solid();
+				case OPAQUE -> !translucent;
+				case TRANSLUCENT -> translucent;
+			};
+		}
+	}
+
+	/** Draws the picked sections' layers into the map, through the chunk batcher, with the game's render state for each. */
+	private void drawLayers(FrameUniforms frame, Vec3 camera, Layers which) {
+		this.begin(PackPass.Kind.SHADOW, this.framebuffer);
+		try {
+			for (RenderType type : ChunkBatcher.LAYERS) {
+				if (!which.has(type)) continue;
+				type.setupRenderState();
+				try {
+					ChunkBatcher.drawShadow(type, this.sections, camera.x, camera.y, camera.z, frame.shadowView, frame.shadowProjection);
+				} finally {
+					type.clearRenderState();
+				}
+			}
+		} finally {
+			this.end();
+		}
+	}
+
+	private int bound;
+
+	/** Draws into the map from now ({@code kind}: SHADOW, or SHADOW_DEPTH into shadowtex1). */
+	private void begin(PackPass.Kind kind, Gl.Framebuffer target) {
+		this.bound = Gl.drawFramebuffer();
+		this.drawing = kind;
+		target.bind();
+		Gl.viewport(this.resolution, this.resolution);
+	}
+
+	/** Back to what was drawn into before {@link #begin}: the caller sets the viewport again. */
+	private void end() {
+		this.drawing = null;
+		Gl.bindFramebuffer(this.bound);
+		// The shadow programs draw both sides.
+		RenderSystem.enableCull();
 	}
 
 	/**
-	 * Entities' shadows (mobs, players, block entities, dropped items): the game's draws of them prepared for this frame
-	 * ({@code features}: those it draws for the camera), drawn again into the map with the pack's shadow programs, as the sun sees
-	 * them (TranslateTarget#SHADOW_FROM_VIEW), into shadowtex0 and shadowtex1. A kept map first gets back its terrain alone,
-	 * without the last frame's.
+	 * Entities' shadows (mobs, players, block entities, dropped items) near enough to the camera, drawn into the map with the
+	 * pack's shadow programs, into shadowtex0 and shadowtex1, every frame. A kept map first gets back its terrain alone,
+	 * without the last frame's. With the camera's view, as the game draws them (the programs turn it into the sun's).
 	 */
-	void renderEntities(FrameUniforms frame, FeatureRenderDispatcher.PreparedFrame features, Consumer<RenderPass> bind) {
-		if (!frame.hasShadow || !this.valid) return;
-		boolean any = !features.isEmpty();
+	void renderEntities(Minecraft mc, FrameUniforms frame, DeltaTracker delta, Matrix4fc view) {
+		if (!frame.hasShadow || !this.valid || mc.level == null) return;
+		Camera camera = mc.gameRenderer.getMainCamera();
+		List<Entity> entities = this.entities(mc.level, camera);
+		List<BlockEntity> blockEntities = this.blockEntities(camera);
+		boolean any = !entities.isEmpty() || !blockEntities.isEmpty();
 		if (!any && !this.entitiesDrawn) return;
-		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		if (this.drawnEachFrame && !this.terrainSaved && !this.entitiesDrawn) {
 			// The terrain is drawn again next frame, before its entities: nothing to go back to.
 		} else if (!this.terrainSaved) {
-			if (this.terrainCopies.isEmpty()) {
-				this.terrainCopies.add(this.copyOf(this.depth));
-				if (this.depthSolid != null) this.terrainCopies.add(this.copyOf(this.depthSolid));
-				for (int b : this.buffers) this.terrainCopies.add(this.copyOf(this.colorViews[b].texture()));
-			}
-			for (GpuTexture[] c : this.terrainCopies) {
-				encoder.copyTextureToTexture(c[0], c[1], 0, 0, 0, 0, 0, this.resolution, this.resolution);
-			}
+			if (this.terrainCopies.isEmpty()) this.copies(this.terrainCopies, true);
+			for (int[] c : this.terrainCopies) Gl.copy(c[0], c[1], this.resolution, this.resolution, c[2] != 0);
 			this.terrainSaved = true;
 		} else if (this.entitiesDrawn) {
-			for (GpuTexture[] c : this.terrainCopies) {
-				encoder.copyTextureToTexture(c[1], c[0], 0, 0, 0, 0, 0, this.resolution, this.resolution);
-			}
+			for (int[] c : this.terrainCopies) Gl.copy(c[1], c[0], this.resolution, this.resolution, c[2] != 0);
 		}
 		this.entitiesDrawn = false;
 		if (!any) return;
 
-		List<RenderPassDescriptor.@Nullable Attachment<Optional<Vector4fc>>> colors = new ArrayList<>();
-		for (int b : this.buffers) colors.add(new RenderPassDescriptor.Attachment<>(this.colorViews[b], Optional.empty()));
-		RenderPass.RenderArea area = new RenderPass.RenderArea(0, 0, this.resolution, this.resolution);
-		this.drawEntities(new RenderPassDescriptor(() -> "Afterburner shadow map entities", colors,
-			new RenderPassDescriptor.Attachment<>(this.depthView, OptionalDouble.empty()), area), PackPass.Kind.SHADOW, features, bind);
+		this.drawEntities(mc, delta, view, entities, blockEntities, PackPass.Kind.SHADOW, this.framebuffer);
 		this.entitiesDrawn = true;
 		// And into shadowtex1: copied over when the map has no water or glass, else drawn again there, its colors left alone.
-		if (this.depthSolid == null) return;
+		if (this.solidFramebuffer == null) return;
 		if (!this.translucentsDrawn) {
-			encoder.copyTextureToTexture(this.depth, this.depthSolid, 0, 0, 0, 0, 0, this.resolution, this.resolution);
+			Gl.copy(this.depth, this.depthSolid, this.resolution, this.resolution, true);
 			return;
 		}
-		this.drawEntities(new RenderPassDescriptor(() -> "Afterburner shadow map entities without translucents", colors,
-			new RenderPassDescriptor.Attachment<>(this.depthSolidView, OptionalDouble.empty()), area), PackPass.Kind.SHADOW_DEPTH, features, bind);
+		this.drawEntities(mc, delta, view, entities, blockEntities, PackPass.Kind.SHADOW_DEPTH, this.solidFramebuffer);
 	}
 
-	private void drawEntities(RenderPassDescriptor descriptor, PackPass.Kind kind, FeatureRenderDispatcher.PreparedFrame features,
-			Consumer<RenderPass> bind) {
-		try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(descriptor)) {
-			((PackPass) pass).afterburner$setPackKind(kind);
-			RenderSystem.bindDefaultUniforms(pass);
-			bind.accept(pass);
-			// The entities drawn for the shadow alone too (ShadowEntities).
-			ShadowEntities.drawing(true);
-			try {
-				features.executeSolid(pass);
-			} finally {
-				ShadowEntities.drawing(false);
+	/** The entities casting shadows: within range, the camera's own too (your own shadow), not other players of this client. */
+	private List<Entity> entities(ClientLevel level, Camera camera) {
+		List<Entity> out = new ArrayList<>();
+		if (this.entityRange <= 0.0) return out;
+		Vec3 at = camera.getPosition();
+		double reach = this.entityRange * this.entityRange;
+		for (Entity entity : level.entitiesForRendering()) {
+			if (entity.tickCount == 0 || entity.distanceToSqr(at) > reach) continue;
+			if (entity instanceof LocalPlayer && camera.getEntity() != entity) continue;
+			if (entity != camera.getEntity() && !entity.shouldRender(at.x, at.y, at.z)) continue;
+			out.add(entity);
+		}
+		return out;
+	}
+
+	/** The block entities of the picked sections within range. */
+	private List<BlockEntity> blockEntities(Camera camera) {
+		List<BlockEntity> out = new ArrayList<>();
+		if (this.entityRange <= 0.0) return out;
+		Vec3 at = camera.getPosition();
+		double reach = (this.entityRange + SECTION_RADIUS) * (this.entityRange + SECTION_RADIUS);
+		double blockReach = this.entityRange * this.entityRange;
+		for (SectionRenderDispatcher.RenderSection section : this.sections) {
+			BlockPos origin = section.getOrigin();
+			if (at.distanceToSqr(origin.getX() + 8, origin.getY() + 8, origin.getZ() + 8) > reach) continue;
+			for (BlockEntity be : section.getCompiled().getRenderableBlockEntities()) {
+				BlockPos p = be.getBlockPos();
+				if (at.distanceToSqr(p.getX() + 0.5, p.getY() + 0.5, p.getZ() + 0.5) <= blockReach) out.add(be);
 			}
+		}
+		return out;
+	}
+
+	private void drawEntities(Minecraft mc, DeltaTracker delta, Matrix4fc view, List<Entity> entities, List<BlockEntity> blockEntities,
+			PackPass.Kind kind, Gl.Framebuffer target) {
+		Camera camera = mc.gameRenderer.getMainCamera();
+		Vec3 at = camera.getPosition();
+		EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
+		BlockEntityRenderDispatcher blocks = mc.getBlockEntityRenderDispatcher();
+		MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+		TickRateManager ticks = mc.level.tickRateManager();
+		Matrix4fStack modelView = RenderSystem.getModelViewStack();
+		modelView.pushMatrix();
+		modelView.set(view);
+		RenderSystem.applyModelViewMatrix();
+		buffers.endBatch();
+		// The game's round shadows under them aren't drawn into the sun's.
+		dispatcher.setRenderShadow(false);
+		this.begin(kind, target);
+		PoseStack pose = new PoseStack();
+		try {
+			for (Entity entity : entities) {
+				float partial = delta.getGameTimeDeltaPartialTick(!ticks.isEntityFrozen(entity));
+				double x = Mth.lerp(partial, entity.xOld, entity.getX());
+				double y = Mth.lerp(partial, entity.yOld, entity.getY());
+				double z = Mth.lerp(partial, entity.zOld, entity.getZ());
+				float yaw = Mth.lerp(partial, entity.yRotO, entity.getYRot());
+				dispatcher.render(entity, x - at.x, y - at.y, z - at.z, yaw, partial, pose, buffers, dispatcher.getPackedLightCoords(entity, partial));
+			}
+			float partial = delta.getGameTimeDeltaPartialTick(false);
+			for (BlockEntity be : blockEntities) {
+				BlockPos p = be.getBlockPos();
+				pose.pushPose();
+				pose.translate(p.getX() - at.x, p.getY() - at.y, p.getZ() - at.z);
+				blocks.render(be, partial, pose, buffers);
+				pose.popPose();
+			}
+			buffers.endBatch();
+		} catch (RuntimeException e) {
+			// An entity that doesn't draw outside the game's own pass casts no shadow; what was drawn so far stays.
+			buffers.endBatch();
+			this.valid = false;
+		} finally {
+			this.end();
+			dispatcher.setRenderShadow(true);
+			modelView.popMatrix();
+			RenderSystem.applyModelViewMatrix();
 		}
 	}
 
@@ -521,19 +584,26 @@ final class ShadowMap implements AutoCloseable {
 		return this.entityRange;
 	}
 
-	/** A texture of the map, and one like it to keep a copy in. */
-	private GpuTexture[] copyOf(GpuTexture t) {
-		GpuTexture copy = RenderSystem.getDevice().createTexture(t.getLabel() + " terrain", USAGE, t.getFormat(), this.resolution, this.resolution, 1, 1);
-		this.textures.add(copy);
-		return new GpuTexture[] {t, copy};
+	/** Copies of the map's textures to go back to: the depth (with shadowtex1's for {@code solid}), then the colors drawn. */
+	private void copies(List<int[]> into, boolean solid) {
+		into.add(this.copyOf(this.depth, Gl.Format.DEPTH, true));
+		if (solid && this.depthSolid != 0) into.add(this.copyOf(this.depthSolid, Gl.Format.DEPTH, true));
+		for (int b : this.buffers) into.add(this.copyOf(this.colors[b], this.formats[b], false));
+	}
+
+	/** A texture of the map, and one like it to keep a copy in, and 1 if it's a depth. */
+	private int[] copyOf(int texture, Gl.Format format, boolean depth) {
+		int copy = this.keep(Gl.texture(format, this.resolution, this.resolution, depth, false));
+		return new int[] {texture, copy, depth ? 1 : 0};
 	}
 
 	/**
 	 * Picks the sections in the shadow's box, from a box made bigger by how far the camera and sun may move until the next pick,
-	 * so the list (and the chunk batcher's draws) stay the same for a while.
+	 * so the list stays the same for a while.
 	 */
-	private void pick(ViewArea area, Vec3 camera, Matrix4fc view) {
-		long center = area.getCameraSectionPos().asLong();
+	private void pick(ViewArea area, ClientLevel level, Vec3 camera, Matrix4fc view) {
+		SectionPos middle = SectionPos.of(camera);
+		long center = middle.asLong();
 		if (this.picked && area == this.pickedArea && center == this.pickedSection && camera.distanceToSqr(this.pickedX, this.pickedY, this.pickedZ) < MOVE * MOVE
 				&& turnedLittle(view, this.pickedView)) {
 			return;
@@ -579,14 +649,15 @@ final class ShadowMap implements AutoCloseable {
 			volZ0 = SectionPos.posToSectionCoord(camera.z - this.volume[2] * 0.5 - MOVE);
 			volZ1 = SectionPos.posToSectionCoord(camera.z + this.volume[2] * 0.5 + MOVE);
 		}
-		SectionPos middle = area.getCameraSectionPos();
-		int radius = area.getViewDistance();
-		int x0 = Math.max(Math.min(SectionPos.posToSectionCoord(camera.x + minX), volX0), middle.x() - radius);
-		int x1 = Math.min(Math.max(SectionPos.posToSectionCoord(camera.x + maxX), volX1), middle.x() + radius);
-		int y0 = Math.max(Math.min(SectionPos.posToSectionCoord(camera.y + minY), volY0), area.minSectionY());
-		int y1 = Math.min(Math.max(SectionPos.posToSectionCoord(camera.y + maxY), volY1), area.maxSectionY());
-		int z0 = Math.max(Math.min(SectionPos.posToSectionCoord(camera.z + minZ), volZ0), middle.z() - radius);
-		int z1 = Math.min(Math.max(SectionPos.posToSectionCoord(camera.z + maxZ), volZ1), middle.z() + radius);
+		// The view area's grid wraps around: past its radius a section is another place's.
+		ViewAreaAccessor grid = (ViewAreaAccessor) area;
+		int radiusX = (grid.afterburner$sizeX() - 1) / 2, radiusZ = (grid.afterburner$sizeZ() - 1) / 2;
+		int x0 = Math.max(Math.min(SectionPos.posToSectionCoord(camera.x + minX), volX0), middle.x() - radiusX);
+		int x1 = Math.min(Math.max(SectionPos.posToSectionCoord(camera.x + maxX), volX1), middle.x() + radiusX);
+		int y0 = Math.max(Math.min(SectionPos.posToSectionCoord(camera.y + minY), volY0), level.getMinSection());
+		int y1 = Math.min(Math.max(SectionPos.posToSectionCoord(camera.y + maxY), volY1), level.getMaxSection() - 1);
+		int z0 = Math.max(Math.min(SectionPos.posToSectionCoord(camera.z + minZ), volZ0), middle.z() - radiusZ);
+		int z1 = Math.min(Math.max(SectionPos.posToSectionCoord(camera.z + maxZ), volZ1), middle.z() + radiusZ);
 
 		// Then each section's middle, camera-relative like the terrain, against the box in the shadow's view.
 		float m00 = view.m00(), m01 = view.m01(), m02 = view.m02();
@@ -604,8 +675,8 @@ final class ShadowMap implements AutoCloseable {
 					double vz = m02 * cx + m12 * cy + m22 * cz + m32;
 					boolean inVolume = sx >= volX0 && sx <= volX1 && sy >= volY0 && sy <= volY1 && sz >= volZ0 && sz <= volZ1;
 					if (!inVolume && (Math.abs(vx) > side || Math.abs(vy) > side || vz > near || vz < far)) continue;
-					SectionRenderDispatcher.RenderSection section = area.getRenderSectionAt(this.at.set(sx * 16, sy * 16, sz * 16));
-					if (section != null) this.sections.add(section);
+					SectionRenderDispatcher.RenderSection section = grid.afterburner$sectionAt(this.at.set(sx * 16, sy * 16, sz * 16));
+					if (section != null && section.getOrigin().equals(this.at)) this.sections.add(section);
 				}
 			}
 		}
@@ -622,15 +693,12 @@ final class ShadowMap implements AutoCloseable {
 	public void close() {
 		this.terrainCopies.clear();
 		this.solidCopies.clear();
-		ChunkBatcher.shadowFrame().clear();
 		this.sections.clear();
 		this.pickedArea = null;
 		this.valid = false;
-		for (GpuTextureView v : this.views) v.close();
-		for (GpuTexture t : this.textures) t.close();
-		this.views.clear();
+		this.framebuffer.close();
+		if (this.solidFramebuffer != null) this.solidFramebuffer.close();
+		for (int t : this.textures) Gl.deleteTexture(t);
 		this.textures.clear();
-		this.projection.close();
-		MemoryUtil.memFree(this.projectionData);
 	}
 }

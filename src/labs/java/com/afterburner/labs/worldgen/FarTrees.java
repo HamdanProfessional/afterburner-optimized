@@ -8,10 +8,13 @@ import it.unimi.dsi.fastutil.objects.Reference2ByteOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import it.unimi.dsi.fastutil.shorts.ShortList;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.particles.ParticleOptions;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
@@ -19,7 +22,6 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.DifficultyInstance;
-import net.minecraft.world.attribute.EnvironmentAttributeReader;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.flag.FeatureFlagSet;
@@ -52,13 +54,15 @@ import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import net.minecraft.world.level.levelgen.feature.AbstractHugeMushroomFeature;
 import net.minecraft.world.level.levelgen.feature.BambooFeature;
-import net.minecraft.world.level.levelgen.feature.Feature;
+import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
 import net.minecraft.world.level.levelgen.feature.RandomBooleanSelectorFeature;
 import net.minecraft.world.level.levelgen.feature.RandomSelectorFeature;
 import net.minecraft.world.level.levelgen.feature.SimpleRandomSelectorFeature;
 import net.minecraft.world.level.levelgen.feature.TreeFeature;
 import net.minecraft.world.level.levelgen.feature.WeightedPlacedFeature;
-import net.minecraft.world.level.levelgen.placement.FeaturePlacer;
+import net.minecraft.world.level.levelgen.feature.configurations.RandomBooleanFeatureConfiguration;
+import net.minecraft.world.level.levelgen.feature.configurations.RandomFeatureConfiguration;
+import net.minecraft.world.level.levelgen.feature.configurations.SimpleRandomFeatureConfiguration;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import net.minecraft.world.level.levelgen.placement.PlacementContext;
 import net.minecraft.world.level.levelgen.placement.PlacementModifier;
@@ -134,7 +138,7 @@ public final class FarTrees {
 	private final int[] failures;
 	private static final int FAILURES = 16;
 	/** Per tree (by identity: they're records): a few grown for real, to put down again at the coarser levels. */
-	private final Map<Feature, Variants> variants = new IdentityHashMap<>();
+	private final Map<ConfiguredFeature<?, ?>, Variants> variants = new IdentityHashMap<>();
 	private static final int VARIANTS = 8;
 
 	private FarTrees(ServerLevel level, ChunkGenerator generator, FarLand land, BlockState fluid, int seaLevel) {
@@ -154,8 +158,8 @@ public final class FarTrees {
 		if (data == null) return;
 		boolean[] tree = new boolean[features.size()];
 		for (int i = 0; i < tree.length; i++) {
-			tree[i] = features.get(i).getFeatures().anyMatch(h -> isTree(h.value()) || h.value() instanceof BambooFeature);
-			if (tree[i]) features.get(i).getFeatures().filter(h -> isTree(h.value())).forEach(h -> variants.computeIfAbsent(h.value(), f -> new Variants()));
+			tree[i] = features.get(i).getFeatures().anyMatch(f -> isTree(f) || f.feature() instanceof BambooFeature);
+			if (tree[i]) features.get(i).getFeatures().filter(FarTrees::isTree).forEach(f -> variants.computeIfAbsent(f, k -> new Variants()));
 		}
 		for (Holder<Biome> biome : generator.getBiomeSource().possibleBiomes()) {
 			List<HolderSet<PlacedFeature>> all = generator.getBiomeGenerationSettings(biome).features();
@@ -169,8 +173,8 @@ public final class FarTrees {
 		}
 	}
 
-	private static boolean isTree(Feature feature) {
-		return feature instanceof TreeFeature || feature instanceof AbstractHugeMushroomFeature;
+	private static boolean isTree(ConfiguredFeature<?, ?> feature) {
+		return feature.feature() instanceof TreeFeature || feature.feature() instanceof AbstractHugeMushroomFeature;
 	}
 
 	/** A tree's blocks around where it was grown: x and z offsets +-128, y up from there. */
@@ -251,7 +255,7 @@ public final class FarTrees {
 		if (state.isAir() || state.getBlock() instanceof LiquidBlock) return false;
 		if (state.getBlock() instanceof LeavesBlock || state.is(Blocks.SNOW)) return true;
 		try {
-			if (state.isSolidRender()) return true;
+			if (state.isSolidRender(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)) return true;
 			double volume = 0;
 			for (AABB box : state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).toAabbs()) {
 				volume += box.getXsize() * box.getYsize() * box.getZsize();
@@ -268,7 +272,6 @@ public final class FarTrees {
 		/** Where trees are grown alone for {@link #variants}. */
 		private final StandIn nursery = new StandIn();
 		private final WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(0L));
-		private final FeaturePlacer placer = new FeaturePlacer(world, generator);
 		private final BitSet wanted = new BitSet();
 		private final ReferenceOpenHashSet<Holder<Biome>> seen = new ReferenceOpenHashSet<>();
 		/** Trees grown (features placed that put something down), and chunks with buildings, for the check command. */
@@ -312,12 +315,12 @@ public final class FarTrees {
 				}
 				built++;
 			}
-			BlockPos origin = new BlockPos(ox, level.getMinSectionY() << 4, oz);
+			BlockPos origin = new BlockPos(ox, SectionPos.sectionToBlockCoord(level.getMinSection()), oz);
 			for (int i = wanted.nextSetBit(0); i >= 0; i = wanted.nextSetBit(i + 1)) {
 				if (failures[i] >= FAILURES) continue;
 				random.setFeatureSeed(decorationSeed, i, step);
 				try {
-					if (exact ? placer.placeWithBiomeCheck(features.get(i), random, origin) : placeStamped(features.get(i), origin, true)) placed++;
+					if (exact ? features.get(i).placeWithBiomeCheck(world, generator, random, origin) : placeStamped(features.get(i), origin, true)) placed++;
 				} catch (RuntimeException e) {
 					// What it put down before failing stays (the chunk's other trees aren't grown, as in a failed chunk).
 					if (failures[i]++ == 0) Afterburner.LOGGER.warn("[Afterburner] Far land: a tree feature failed in the far land: {}", features.get(i), e);
@@ -328,11 +331,11 @@ public final class FarTrees {
 		}
 
 		/**
-		 * As the game's {@link FeaturePlacer}: the placement's positions depth first (each goes all the way down before
-		 * the next is drawn), but with trees put down by {@link #putDown}.
+		 * As the game's {@link PlacedFeature#place}: the placement's positions depth first (each goes all the way down
+		 * before the next is drawn), but with trees put down by {@link #putDown}.
 		 */
 		private boolean placeStamped(PlacedFeature placed, BlockPos origin, boolean biomeCheck) {
-			Feature feature = placed.feature().value();
+			ConfiguredFeature<?, ?> feature = placed.feature().value();
 			List<PlacementModifier> placement = placed.placement();
 			if (placement.isEmpty()) return putDown(feature, origin);
 			PlacementContext context = new PlacementContext(world, generator, biomeCheck ? Optional.of(placed) : Optional.empty());
@@ -345,7 +348,7 @@ public final class FarTrees {
 				BlockPos pos = positions.removeLast();
 				int index = indices.removeInt(indices.size() - 1);
 				modified.clear();
-				placement.get(index).modify(context, random, pos, modified::add);
+				placement.get(index).getPositions(context, random, pos).forEach(modified::add);
 				if (index + 1 < placement.size()) {
 					for (int j = modified.size() - 1; j >= 0; j--) {
 						positions.add(modified.get(j));
@@ -359,18 +362,18 @@ public final class FarTrees {
 		}
 
 		/** The game's choosing between features as it does; a tree as one of its kind grown before; anything else as is. */
-		private boolean putDown(Feature feature, BlockPos pos) {
-			if (feature instanceof RandomSelectorFeature selector) {
-				for (WeightedPlacedFeature option : selector.features()) {
-					if (random.nextFloat() < option.chance()) return placeStamped(option.feature().value(), pos, false);
+		private boolean putDown(ConfiguredFeature<?, ?> feature, BlockPos pos) {
+			if (feature.feature() instanceof RandomSelectorFeature && feature.config() instanceof RandomFeatureConfiguration selector) {
+				for (WeightedPlacedFeature option : selector.features) {
+					if (random.nextFloat() < option.chance) return placeStamped(option.feature.value(), pos, false);
 				}
-				return placeStamped(selector.defaultFeature().value(), pos, false);
+				return placeStamped(selector.defaultFeature.value(), pos, false);
 			}
-			if (feature instanceof RandomBooleanSelectorFeature selector) {
-				return placeStamped((random.nextBoolean() ? selector.featureTrue() : selector.featureFalse()).value(), pos, false);
+			if (feature.feature() instanceof RandomBooleanSelectorFeature && feature.config() instanceof RandomBooleanFeatureConfiguration selector) {
+				return placeStamped((random.nextBoolean() ? selector.featureTrue : selector.featureFalse).value(), pos, false);
 			}
-			if (feature instanceof SimpleRandomSelectorFeature selector) {
-				return placeStamped(selector.features().get(random.nextInt(selector.features().size())).value(), pos, false);
+			if (feature.feature() instanceof SimpleRandomSelectorFeature && feature.config() instanceof SimpleRandomFeatureConfiguration selector) {
+				return placeStamped(selector.features.get(random.nextInt(selector.features.size())).value(), pos, false);
 			}
 			Variants kind = variants.get(feature);
 			if (kind == null) return feature.place(world, generator, random, pos);
@@ -526,8 +529,18 @@ public final class FarTrees {
 		public @Nullable ChunkAccess getChunk(int x, int z, ChunkStatus status, boolean loadOrGenerate) {
 			if (!loadOrGenerate) return null;
 			// No chunks: only one to take the marks for blocks to update later (the far land has no later).
-			if (marks == null) marks = new ProtoChunk(new ChunkPos(x, z), UpgradeData.EMPTY, level, level.palettedContainerFactory(), null);
+			if (marks == null) marks = new ProtoChunk(new ChunkPos(x, z), UpgradeData.EMPTY, level, level.registryAccess().registryOrThrow(Registries.BIOME), null);
 			return marks;
+		}
+
+		@Override
+		public boolean hasChunk(int x, int z) {
+			return true;
+		}
+
+		@Override
+		public float getShade(Direction direction, boolean shade) {
+			return 1.0F;
 		}
 
 		@Override
@@ -553,11 +566,6 @@ public final class FarTrees {
 		@Override
 		public FeatureFlagSet enabledFeatures() {
 			return level.enabledFeatures();
-		}
-
-		@Override
-		public EnvironmentAttributeReader environmentAttributes() {
-			return level.environmentAttributes();
 		}
 
 		@Override
@@ -662,7 +670,7 @@ public final class FarTrees {
 		}
 
 		@Override
-		public void playSound(@Nullable Entity except, BlockPos pos, SoundEvent sound, SoundSource source, float volume, float pitch) {
+		public void playSound(@Nullable Player except, BlockPos pos, SoundEvent sound, SoundSource source, float volume, float pitch) {
 		}
 
 		@Override
@@ -670,7 +678,7 @@ public final class FarTrees {
 		}
 
 		@Override
-		public void levelEvent(@Nullable Entity source, int type, BlockPos pos, int data) {
+		public void levelEvent(@Nullable Player source, int type, BlockPos pos, int data) {
 		}
 
 		@Override

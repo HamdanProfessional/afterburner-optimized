@@ -2,6 +2,7 @@ package com.afterburner.labs.mixin.lod;
 
 import com.afterburner.labs.lod.Lod;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ReceivingLevelScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import org.jspecify.annotations.Nullable;
@@ -18,12 +19,12 @@ public abstract class LodMinecraftMixin {
 	public @Nullable ClientLevel level;
 
 	@Inject(method = "setLevel", at = @At("HEAD"))
-	private void afterburner$changeLevel(ClientLevel next, CallbackInfo ci) {
+	private void afterburner$changeLevel(ClientLevel next, ReceivingLevelScreen.Reason reason, CallbackInfo ci) {
 		if (this.level != null && this.level != next) Lod.leave(this.level);
 	}
 
-	@Inject(method = "disconnect(Lnet/minecraft/client/gui/screens/Screen;ZZ)V", at = @At("HEAD"))
-	private void afterburner$disconnect(Screen screen, boolean keepResourcePacks, boolean stopSound, CallbackInfo ci) {
+	@Inject(method = "disconnect(Lnet/minecraft/client/gui/screens/Screen;Z)V", at = @At("HEAD"))
+	private void afterburner$disconnect(Screen screen, boolean keepResourcePacks, CallbackInfo ci) {
 		if (this.level != null) Lod.leave(this.level);
 	}
 

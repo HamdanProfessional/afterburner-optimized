@@ -146,6 +146,15 @@ public final class FpsTarget {
 		return dx * dx + dz * dz < (long) cap * cap;
 	}
 
+	/** Whether chunk ({@code x}, {@code z}) is drawn with {@code margin} chunks to spare, seen from chunk ({@code cx}, {@code cz}). */
+	public static boolean drawnWithin(int cx, int cz, int x, int z, int margin) {
+		int cap = drawCap;
+		if (cap == NONE) return true;
+		long dx = Math.max(0, Math.abs(x - cx) - 1), dz = Math.max(0, Math.abs(z - cz) - 1);
+		long r = Math.max(0, cap - margin);
+		return dx * dx + dz * dz < r * r;
+	}
+
 	/** Takes the sections further than the chunk distance drawn out of a list, keeping the order of the rest. */
 	public static void filter(List<SectionRenderDispatcher.RenderSection> list, double camX, double camZ) {
 		if (drawCap == NONE) return;

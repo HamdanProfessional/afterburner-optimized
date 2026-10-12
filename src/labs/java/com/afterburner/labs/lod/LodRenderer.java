@@ -1,22 +1,12 @@
 package com.afterburner.labs.lod;
 
 import com.afterburner.Mobile;
+import com.afterburner.client.perf.FpsTarget;
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.buffers.GpuBuffer;
-import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
-import com.mojang.renderpearl.api.commands.RenderPass;
-import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
-import com.mojang.renderpearl.api.pipeline.BlendFunction;
-import com.mojang.renderpearl.api.pipeline.ColorTargetState;
-import com.mojang.renderpearl.api.pipeline.CompareOp;
-import com.mojang.renderpearl.api.pipeline.CompiledRenderPipeline;
-import com.mojang.renderpearl.api.pipeline.DepthStencilState;
-import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
-import com.mojang.renderpearl.api.pipeline.RenderPipeline;
-import com.mojang.renderpearl.api.pipeline.UniformType;
-import com.mojang.renderpearl.api.textures.FilterMode;
-import com.mojang.renderpearl.api.vertex.VertexFormat;
+import com.mojang.blaze3d.vertex.BufferUploader;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2LongMap;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -24,18 +14,17 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
+import net.minecraft.Util;
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.culling.Frustum;
-import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.util.Mth;
-import net.minecraft.util.Util;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -44,18 +33,24 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.jspecify.annotations.Nullable;
+import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+
+import static org.lwjgl.opengl.GL32C.*;
 
 /**
  * Draws one world's far terrain: picks the nodes to show (finer near the player, coarser further out, never coarse
  * ones over the chunks the game draws itself), asks the worker for their meshes, uploads what it built, and draws them
- * in the main pass right after the solid terrain. Render thread only.
+ * right after the solid and cutout terrain, with the solid terrain's render state. Render thread only.
  * <p>
  * Where the game's own chunks are, the vertex shader hides the far terrain chunk by chunk: a mask of 256 x 256 chunks
  * (wrapping around) says which ones the game draws, and quads at levels 0 and 1 never cross a chunk's border.
@@ -63,13 +58,14 @@ import java.util.Comparator;
  * Drawn by a shader pack instead (its dh_terrain, see Lod), it has the pack's projection for it, and no mask: the game's
  * chunks are drawn over it, and the pack hides it near the player itself; under the game's chunks near their edge it's kept,
  * for packs that fade those out there. A pack with dh_water draws the water on its own, see-through, after the rest.
+ * <p>
+ * Plain OpenGL: a vertex array per node over its vertex buffer and the game's shared quad index buffer, and programs of
+ * its own (far_terrain, far_water_floor) read from the resources. It puts back the program, the vertex array and the
+ * active texture unit it finds.
  */
 final class LodRenderer {
 	private static final Logger LOGGER = LoggerFactory.getLogger("afterburner");
-	static final VertexFormat FORMAT = VertexFormat.builder(0)
-			.addAttribute("Position", GpuFormat.R32_UINT)
-			.addAttribute("Color", GpuFormat.RGBA8_UNORM)
-			.build();
+	/** Position (one unsigned int, see LodMesher) and Color (four bytes): {@link Lod#PACK_ATTRIBUTES}, at locations 0 and 1. */
 	private static final int VERTEX_BYTES = 8;
 	/** A node is split into finer ones while the player is nearer than this many of its voxels. */
 	private static final int DETAIL = 256;
@@ -84,17 +80,19 @@ final class LodRenderer {
 	private static final int MASK_ROWS = 64;
 	/** Loaded chunks copied for the far terrain per frame at most ({@link #copyLoaded}). */
 	private static final int COPIES_PER_FRAME = 4;
-	/** How long past its fade-in a chunk whose sections changed is asked every frame (ms). */
-	private static final long WATCH_AFTER_FADE = 1000;
+	/** How long a chunk whose sections changed is asked every frame (ms). */
+	private static final long WATCH_FOR = 1000;
 	/**
 	 * With a shader pack, nodes the game's chunks cover are kept from this far out (of the render distance): Complementary
 	 * hides the far terrain nearer than 0.4 of it, MakeUp fades the game's chunks out from 0.9.
 	 */
 	private static final double PACK_UNDER = 0.35;
-	/** LodView: DrawnY (ivec4), then the shader pack's projection (mat4). */
-	private static final int VIEW_BYTES = 80;
-	private static @Nullable RenderPipeline pipeline, waterPipeline, floorPipeline;
-	private static boolean failed;
+	/** Texture units: the lightmap where the game has it, the mask past the units the game's state tracking covers (0-11). */
+	private static final int LIGHTMAP_UNIT = 2, MASK_UNIT = 13;
+	/** The far terrain's own program and the floor's for shader packs; 0 until made. */
+	private static int program, floorProgram;
+	private static int projLocation, fogStartLocation, fogEndLocation, fogColorLocation, fogShapeLocation;
+	private static boolean failed, floorFailed;
 	/** What of a node {@link #drawNodes} draws: all of it, all but the water, or the water. */
 	static final int ALL = 0, SOLID = 1, WATER = 2;
 
@@ -106,7 +104,8 @@ final class LodRenderer {
 		/** In blocks, for the frustum test. */
 		int minY, maxY;
 		double distance;
-		@Nullable GpuBuffer vertices, info;
+		/** The vertex buffer and the vertex array over it; 0 for none. */
+		int buffer, array;
 
 		Node(int level, int nx, int nz) {
 			this.level = level;
@@ -115,9 +114,19 @@ final class LodRenderer {
 		}
 
 		void close() {
-			if (vertices != null) vertices.close();
-			if (info != null) info.close();
-			vertices = info = null;
+			if (array != 0) GlStateManager._glDeleteVertexArrays(array);
+			if (buffer != 0) GlStateManager._glDeleteBuffers(buffer);
+			buffer = array = 0;
+		}
+	}
+
+	/** Where a program has the uniforms set here; -1 for one it doesn't have. */
+	private record Uniforms(int nodeOrigin, int nodeFlags, int cameraBlockPos, int cameraOffset, int modelView, int dhProjection, int drawnY) {
+		static Uniforms of(int program) {
+			return new Uniforms(glGetUniformLocation(program, "NodeOrigin"), glGetUniformLocation(program, "NodeFlags"),
+					glGetUniformLocation(program, "CameraBlockPos"), glGetUniformLocation(program, "CameraOffset"),
+					glGetUniformLocation(program, "ModelViewMat"), glGetUniformLocation(program, "DhProjection"),
+					glGetUniformLocation(program, "DrawnY"));
 		}
 	}
 
@@ -132,22 +141,18 @@ final class LodRenderer {
 	 */
 	private final byte[] compiled = new byte[MASK * MASK], top = new byte[MASK * MASK], ground = new byte[MASK * MASK];
 	private final ByteBuffer maskData = MemoryUtil.memAlloc(MASK * MASK);
-	private final ByteBuffer infoData = MemoryUtil.memAlloc(32);
-	private final ByteBuffer viewData = MemoryUtil.memCalloc(VIEW_BYTES);
 	private final BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
-	private @Nullable GpuBuffer maskBuffer, viewBuffer;
-	private boolean maskChanged = true, viewChanged = true, closed;
-	/** The game's draw distance in chunks and the camera's chunk, as the mask was made for. */
-	private int viewDistance = -1, viewX, viewZ;
-	/**
-	 * The sections the game draws, from the world's bottom one (first, and one past the last): only as many above and
-	 * below the camera's as its draw distance. Outside them the far terrain shows even where the game draws the chunk.
-	 */
+	/** The mask's buffer and the buffer texture (R8UI) over it; 0 until made. */
+	private int maskBuffer, maskTexture;
+	private boolean maskChanged = true, closed;
+	/** The game's draw distance in chunks, the camera's chunk and FpsTarget's cap, as the mask was made for. */
+	private int viewDistance = -1, viewX, viewZ, viewCap;
+	/** The sections the game draws, from the world's bottom one (first, and one past the last): all of them on 1.21.1. */
 	private int bandLo, bandHi;
 	/** Loaded chunks copied for the far terrain (the game's own copy comes when a chunk unloads), and those to copy. */
 	private final LongOpenHashSet copied = new LongOpenHashSet();
 	private final LongLinkedOpenHashSet toCopy = new LongLinkedOpenHashSet();
-	private int frame, maxQuads, lodBlocks;
+	private int frame, lodBlocks;
 	/** System.nanoTime at the start of this frame's prepare. */
 	private long now;
 	/** The game's chunks (plus a margin), in chunks: coarse nodes stay out of it. */
@@ -158,106 +163,133 @@ final class LodRenderer {
 	/** Chunks asked every frame, until the game draws them or the time (Util.getMillis) is up. */
 	private final Long2LongOpenHashMap watched = new Long2LongOpenHashMap();
 	private double camX, camZ;
+	/** This frame's camera: its block, and that block's corner minus where it is exactly (a negative fraction). */
+	private int camBlockX, camBlockY, camBlockZ;
+	private float camOffsetX, camOffsetY, camOffsetZ;
+	private final Matrix4f modelView = new Matrix4f(), projection = new Matrix4f(), packProjection = new Matrix4f();
 	private @Nullable Frustum frustum;
 	/** Drawn by a shader pack this frame. */
 	private boolean forPack;
+	/** This frame's programs' uniforms, by program (asked once a frame: a pack's programs can be made again). */
+	private final Int2ObjectOpenHashMap<Uniforms> uniforms = new Int2ObjectOpenHashMap<>();
 
 	LodRenderer(LodWorld world, LodWorker worker) {
 		this.world = world;
 		this.worker = worker;
 	}
 
-	static RenderPipeline pipeline() {
-		if (pipeline == null) {
-			pipeline = terrain("far_terrain")
-					.withDepthStencilState(DepthStencilState.DEFAULT)
-					// The main pass's one color target, like the solid terrain's.
-					.withColorTargetState(ColorTargetState.DEFAULT)
-					.build();
+	/** The far terrain's own program (far_terrain.vsh/fsh); 0 if it didn't build. */
+	private static int program() {
+		if (program == 0 && !failed) {
+			try {
+				program = build("far_terrain");
+				projLocation = glGetUniformLocation(program, "ProjMat");
+				fogStartLocation = glGetUniformLocation(program, "FogStart");
+				fogEndLocation = glGetUniformLocation(program, "FogEnd");
+				fogColorLocation = glGetUniformLocation(program, "FogColor");
+				fogShapeLocation = glGetUniformLocation(program, "FogShape");
+				int previous = GlStateManager._getInteger(GL_CURRENT_PROGRAM);
+				GlStateManager._glUseProgram(program);
+				glUniform1i(glGetUniformLocation(program, "Sampler2"), LIGHTMAP_UNIT);
+				glUniform1i(glGetUniformLocation(program, "LodMask"), MASK_UNIT);
+				GlStateManager._glUseProgram(previous);
+			} catch (IOException | RuntimeException e) {
+				failed = true;
+				program = 0;
+				LOGGER.error("[Afterburner] The far terrain shader didn't load; far terrain is off until restart", e);
+			}
 		}
-		return pipeline;
-	}
-
-	/** The water, for a shader pack's dh_water: blended like the game's translucent terrain. Only packs draw with it. */
-	static RenderPipeline waterPipeline() {
-		if (waterPipeline == null) {
-			waterPipeline = terrain("far_water")
-					.withDepthStencilState(DepthStencilState.DEFAULT)
-					.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
-					.build();
-		}
-		return waterPipeline;
-	}
-
-	private static RenderPipeline.Builder terrain(String name) {
-		ResourceLocation shader = ResourceLocation.fromNamespaceAndPath("afterburner", "core/far_terrain");
-		return RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
-				.withLocation(ResourceLocation.fromNamespaceAndPath("afterburner", "pipeline/" + name))
-				.withBindGroupLayout(BindGroupLayouts.FOG)
-				.withBindGroupLayout(BindGroupLayouts.SAMPLER2)
-				.withBindGroupLayout(BindGroupLayouts.PROJECTION)
-				.withBindGroupLayout(BindGroupLayouts.TERRAIN_INFO)
-				.withBindGroupLayout(BindGroupLayout.builder()
-						.withUniform("LodNode", UniformType.UNIFORM_BUFFER)
-						.withUniform("LodView", UniformType.UNIFORM_BUFFER)
-						.withUniform("LodMask", UniformType.TEXEL_BUFFER, GpuFormat.R8_UINT)
-						.build())
-				.withVertexShader(shader)
-				.withFragmentShader(shader)
-				.withVertexBinding(0, FORMAT)
-				.withPrimitiveTopology(PrimitiveTopology.QUADS);
+		return program;
 	}
 
 	/**
 	 * Under a shader pack's water, the depth of a floor (far_water_floor.fsh): the far terrain keeps no ground under its
-	 * water, and packs see through water to what's under it. Depth only, with the pack's depth (nearer is less).
+	 * water, and packs see through water to what's under it. Depth only (it writes no color), with the pack's depth (nearer
+	 * is less). 0 if it didn't build.
 	 */
-	static RenderPipeline floorPipeline() {
-		if (floorPipeline == null) {
-			ResourceLocation shader = ResourceLocation.fromNamespaceAndPath("afterburner", "core/far_water_floor");
-			floorPipeline = RenderPipeline.builder(RenderPipelines.GLOBALS_SNIPPET)
-					.withLocation(ResourceLocation.fromNamespaceAndPath("afterburner", "pipeline/far_water_floor"))
-					.withBindGroupLayout(BindGroupLayouts.TERRAIN_INFO)
-					.withBindGroupLayout(BindGroupLayout.builder()
-							.withUniform("LodNode", UniformType.UNIFORM_BUFFER)
-							.withUniform("LodView", UniformType.UNIFORM_BUFFER)
-							.build())
-					.withVertexShader(shader)
-					.withFragmentShader(shader)
-					.withVertexBinding(0, FORMAT)
-					.withPrimitiveTopology(PrimitiveTopology.QUADS)
-					.withDepthStencilState(new DepthStencilState(CompareOp.LESS_THAN, true))
-					.build();
+	static int floorProgram() {
+		if (floorProgram == 0 && !floorFailed) {
+			try {
+				floorProgram = build("far_water_floor");
+			} catch (IOException | RuntimeException e) {
+				floorFailed = true;
+				floorProgram = 0;
+				LOGGER.error("[Afterburner] The far terrain's water floor shader didn't load", e);
+			}
 		}
-		return floorPipeline;
+		return floorProgram;
+	}
+
+	/** Links {@code name}.vsh and .fsh (assets/afterburner/shaders/core), with the vertex attributes at their locations. */
+	private static int build(String name) throws IOException {
+		int vertex = 0, fragment = 0, linked = glCreateProgram();
+		try {
+			vertex = shader(GL_VERTEX_SHADER, name + ".vsh");
+			fragment = shader(GL_FRAGMENT_SHADER, name + ".fsh");
+			glAttachShader(linked, vertex);
+			glAttachShader(linked, fragment);
+			for (int i = 0; i < Lod.PACK_ATTRIBUTES.length; i++) glBindAttribLocation(linked, i, Lod.PACK_ATTRIBUTES[i]);
+			glLinkProgram(linked);
+			if (glGetProgrami(linked, GL_LINK_STATUS) == GL_FALSE) throw new IllegalStateException(name + " didn't link: " + glGetProgramInfoLog(linked));
+			return linked;
+		} catch (IOException | RuntimeException e) {
+			glDeleteProgram(linked);
+			throw e;
+		} finally {
+			// Freed with the program.
+			if (vertex != 0) glDeleteShader(vertex);
+			if (fragment != 0) glDeleteShader(fragment);
+		}
+	}
+
+	private static int shader(int type, String file) throws IOException {
+		String source;
+		try (InputStream in = Minecraft.getInstance().getResourceManager().open(ResourceLocation.fromNamespaceAndPath("afterburner", "shaders/core/" + file))) {
+			source = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+		}
+		int shader = glCreateShader(type);
+		glShaderSource(shader, source);
+		glCompileShader(shader);
+		if (glGetShaderi(shader, GL_COMPILE_STATUS) == GL_FALSE) {
+			String log = glGetShaderInfoLog(shader);
+			glDeleteShader(shader);
+			throw new IllegalStateException(file + " didn't compile: " + log);
+		}
+		return shader;
 	}
 
 	/**
-	 * Before the main pass: uploads, picks the nodes, updates the mask. {@code packProjection} is the shader pack's for it, when
-	 * one draws it.
+	 * Before the solid terrain: uploads, picks the nodes, updates the mask. {@code modelView} and {@code projection} are
+	 * the ones the terrain is drawn with; {@code packProjection} is the shader pack's for it, when one draws it.
 	 */
-	void prepare(Minecraft mc, LevelRenderer levelRenderer, ClientLevel level, CameraRenderState camera, @Nullable Matrix4fc packProjection) {
+	void prepare(Minecraft mc, LevelRenderer levelRenderer, ClientLevel level, Camera camera, Matrix4fc modelView, Matrix4fc projection,
+			@Nullable Matrix4fc packProjection) {
 		frame++;
 		now = System.nanoTime();
 		draws.clear();
-		maxQuads = 0;
+		uniforms.clear();
 		if (failed || closed) return;
 		receive();
-		Vec3 pos = camera.pos;
+		Vec3 pos = camera.getPosition();
 		camX = pos.x;
 		camZ = pos.z;
+		camBlockX = Mth.floor(pos.x);
+		camBlockY = Mth.floor(pos.y);
+		camBlockZ = Mth.floor(pos.z);
+		camOffsetX = (float) (camBlockX - pos.x);
+		camOffsetY = (float) (camBlockY - pos.y);
+		camOffsetZ = (float) (camBlockZ - pos.z);
+		this.modelView.set(modelView);
+		this.projection.set(projection);
 		forPack = packProjection != null;
-		if (packProjection != null) {
-			// The game's frustum ends at its own far plane, not moved out with a pack.
-			frustum = new Frustum(camera.viewRotationMatrix, new Matrix4f(packProjection));
-			frustum.prepare(pos.x, pos.y, pos.z);
-		} else {
-			frustum = camera.cullFrustum;
-		}
+		if (packProjection != null) this.packProjection.set(packProjection);
+		// The game's projection reaches past the far terrain (Lod#depthFar); a pack's is its own.
+		frustum = new Frustum(new Matrix4f(modelView), new Matrix4f(forPack ? this.packProjection : this.projection));
+		frustum.prepare(pos.x, pos.y, pos.z);
 		lodBlocks = LodSettings.drawn() * 16;
 		int rd = mc.options.getEffectiveRenderDistance();
 		int cx = Mth.floor(pos.x) >> 4, cz = Mth.floor(pos.z) >> 4;
-		updateMask(mc, levelRenderer, level, cx, Mth.floor(pos.y) >> 4, cz, rd);
+		updateMask(levelRenderer, level, cx, cz, rd);
 		copyLoaded(level);
 
 		int root = LodMesher.NODE << LodWorld.MAX_LEVEL;
@@ -272,42 +304,33 @@ final class LodRenderer {
 		worker.requests.values().removeIf(r -> r.world == world && r.frame != thisFrame && !r.taken.get());
 		if (frame % 60 == 0) evict();
 
-		if (maxQuads > 0) RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS).getBuffer(maxQuads * 6);
-		if (maskBuffer == null) {
-			maskBuffer = RenderSystem.getDevice().createBuffer(() -> "Afterburner far terrain mask",
-					GpuBuffer.USAGE_UNIFORM_TEXEL_BUFFER | GpuBuffer.USAGE_COPY_DST, MASK * MASK);
+		if (maskBuffer == 0) {
+			maskBuffer = GlStateManager._glGenBuffers();
+			GlStateManager._glBindBuffer(GL_TEXTURE_BUFFER, maskBuffer);
+			glBufferData(GL_TEXTURE_BUFFER, MASK * MASK, GL_DYNAMIC_DRAW);
+			maskTexture = glGenTextures();
+			int active = GlStateManager._getActiveTexture();
+			glActiveTexture(GL_TEXTURE0 + MASK_UNIT);
+			glBindTexture(GL_TEXTURE_BUFFER, maskTexture);
+			glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, maskBuffer);
+			glActiveTexture(active);
 			maskChanged = true;
 		}
 		if (maskChanged) {
 			maskData.clear();
 			maskData.put(mask).flip();
-			RenderSystem.getDevice().createCommandEncoder().writeToBuffer(maskBuffer.slice(), maskData);
+			GlStateManager._glBindBuffer(GL_TEXTURE_BUFFER, maskBuffer);
+			glBufferSubData(GL_TEXTURE_BUFFER, 0, maskData);
 			maskChanged = false;
 		}
-		if (viewBuffer == null) {
-			viewBuffer = RenderSystem.getDevice().createBuffer(() -> "Afterburner far terrain view",
-					GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST, VIEW_BYTES);
-			viewChanged = true;
-		}
-		if (viewChanged || packProjection != null) {
-			viewData.clear();
-			viewData.putInt(world.minY + bandLo * 16).putInt(world.minY + bandHi * 16).putInt(0).putInt(0);
-			if (packProjection != null) packProjection.get(16, viewData);
-			viewData.clear();
-			RenderSystem.getDevice().createCommandEncoder().writeToBuffer(viewBuffer.slice(), viewData);
-			viewChanged = false;
-		}
-		// With a pack it's drawn with the pack's pipeline for it.
-		if (!forPack && !draws.isEmpty() && RenderSystem.getCompiledPipelineNullable(pipeline()) == null) {
-			LOGGER.error("[Afterburner] The far terrain shader didn't load; far terrain is off until restart");
-			failed = true;
-			draws.clear();
-		}
+		GlStateManager._glBindBuffer(GL_TEXTURE_BUFFER, 0);
+		// With a pack it's drawn with the pack's program for it.
+		if (!forPack && !draws.isEmpty() && program() == 0) draws.clear();
 	}
 
 	/** Whether there's anything to draw this frame. */
 	boolean hasDraws() {
-		return !draws.isEmpty() && maskBuffer != null && viewBuffer != null;
+		return !draws.isEmpty() && maskTexture != 0;
 	}
 
 	/** Whether any of it is water this frame. */
@@ -319,48 +342,84 @@ final class LodRenderer {
 		return false;
 	}
 
-	/** In the main pass, after the solid terrain. */
-	void draw(RenderPass pass, GpuBufferSlice terrainUniform) {
-		CompiledRenderPipeline compiled = RenderSystem.getCompiledPipelineNullable(pipeline());
-		if (compiled != null) drawNodes(pass, compiled, terrainUniform, true, ALL);
-	}
-
-	/**
-	 * In a shader pack's pass for it, with the pack's pipeline: its other uniforms are bound. {@code part}: {@link #ALL},
-	 * {@link #SOLID} or {@link #WATER}.
-	 */
-	void drawWith(RenderPass pass, CompiledRenderPipeline compiled, GpuBufferSlice terrainUniform, int part) {
-		drawNodes(pass, compiled, terrainUniform, false, part);
-	}
-
-	/**
-	 * {@code game}: with the game's own pipeline (far_terrain.vsh), which hides it under the game's chunks with the mask.
-	 * {@code part}: what of each node.
-	 */
-	private void drawNodes(RenderPass pass, CompiledRenderPipeline compiled, GpuBufferSlice terrainUniform, boolean game, int part) {
-		if (!hasDraws()) return;
-		pass.pushDebugGroup(() -> "Afterburner far terrain");
-		// Closed even if a draw throws: a group left open crashes the game when the pass ends.
+	/** After the solid and cutout terrain, with the game's projection, fog and lightmap, hidden under its chunks by the mask. */
+	void draw() {
+		if (!hasDraws() || forPack) return;
+		int own = program();
+		if (own == 0) return;
+		// Depth test and writes, culling, no blending, the lightmap as the game's shader texture 2.
+		RenderType.solid().setupRenderState();
+		int previous = GlStateManager._getInteger(GL_CURRENT_PROGRAM);
 		try {
-			pass.setPipeline(compiled);
-			pass.setUniform("TerrainUniform", terrainUniform);
-			pass.setUniform("Sampler2", Minecraft.getInstance().gameRenderer.lightmap(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR));
-			if (game) pass.setUniform("LodMask", maskBuffer);
-			pass.setUniform("LodView", viewBuffer);
-			RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
-			pass.setIndexBuffer(indices.getBuffer(), indices.type());
+			GlStateManager._glUseProgram(own);
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				glUniformMatrix4fv(projLocation, false, projection.get(stack.mallocFloat(16)));
+				float[] fogColor = RenderSystem.getShaderFogColor();
+				glUniform4f(fogColorLocation, fogColor[0], fogColor[1], fogColor[2], fogColor[3]);
+			}
+			glUniform1f(fogStartLocation, RenderSystem.getShaderFogStart());
+			glUniform1f(fogEndLocation, RenderSystem.getShaderFogEnd());
+			glUniform1i(fogShapeLocation, RenderSystem.getShaderFogShape().getIndex());
+			int active = GlStateManager._getActiveTexture();
+			// Past the units the game tracks: set straight, then the active unit put back as it has it.
+			glActiveTexture(GL_TEXTURE0 + MASK_UNIT);
+			glBindTexture(GL_TEXTURE_BUFFER, maskTexture);
+			glActiveTexture(active);
+			GlStateManager._activeTexture(GL_TEXTURE0 + LIGHTMAP_UNIT);
+			GlStateManager._bindTexture(RenderSystem.getShaderTexture(2));
+			GlStateManager._activeTexture(active);
+			drawNodes(uniforms(own), ALL);
+		} finally {
+			GlStateManager._glUseProgram(previous);
+			RenderType.solid().clearRenderState();
+		}
+	}
+
+	/**
+	 * With a program that's in use (a shader pack's for it, or {@link #floorProgram}): its other uniforms and textures are
+	 * the caller's. {@code part}: {@link #ALL}, {@link #SOLID} or {@link #WATER}.
+	 */
+	void drawWith(int program, int part) {
+		if (!hasDraws()) return;
+		drawNodes(uniforms(program), part);
+	}
+
+	private Uniforms uniforms(int program) {
+		Uniforms u = uniforms.get(program);
+		if (u == null) uniforms.put(program, u = Uniforms.of(program));
+		return u;
+	}
+
+	/** Sets the program's view uniforms, then draws {@code part} of each node; leaves no vertex array bound. */
+	private void drawNodes(Uniforms u, int part) {
+		if (u.cameraBlockPos() >= 0) glUniform3i(u.cameraBlockPos(), camBlockX, camBlockY, camBlockZ);
+		if (u.cameraOffset() >= 0) glUniform3f(u.cameraOffset(), camOffsetX, camOffsetY, camOffsetZ);
+		if (u.drawnY() >= 0) glUniform4i(u.drawnY(), world.minY + bandLo * 16, world.minY + bandHi * 16, 0, 0);
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			if (u.modelView() >= 0) glUniformMatrix4fv(u.modelView(), false, modelView.get(stack.mallocFloat(16)));
+			if (u.dhProjection() >= 0 && forPack) glUniformMatrix4fv(u.dhProjection(), false, packProjection.get(stack.mallocFloat(16)));
+		}
+		RenderSystem.AutoStorageIndexBuffer indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+		BufferUploader.invalidate();
+		try {
 			for (Node n : draws) {
-				if (n.vertices == null || n.info == null) continue;
+				if (n.array == 0) continue;
 				// The water's quads are last.
 				int solid = n.quads - n.waterQuads;
 				int count = part == ALL ? n.quads : part == SOLID ? solid : n.waterQuads;
 				if (count == 0) continue;
-				pass.setUniform("LodNode", n.info);
-				pass.setVertexBuffer(0, n.vertices.slice());
-				pass.drawIndexed(count * 6, 1, part == WATER ? solid * 6 : 0, 0, 0);
+				GlStateManager._glBindVertexArray(n.array);
+				// Into this vertex array, as long as the node needs it.
+				indices.bind(n.quads * 6);
+				VertexFormat.IndexType type = indices.type();
+				int size = LodMesher.NODE << n.level;
+				if (u.nodeOrigin() >= 0) glUniform4i(u.nodeOrigin(), n.nx * size, world.minY, n.nz * size, 1 << n.level);
+				if (u.nodeFlags() >= 0) glUniform4i(u.nodeFlags(), n.level <= 1 ? 1 : 0, 0, 0, 0);
+				glDrawElements(GL_TRIANGLES, count * 6, type.asGLType, part == WATER ? (long) solid * 6 * type.bytes : 0L);
 			}
 		} finally {
-			pass.popDebugGroup();
+			GlStateManager._glBindVertexArray(0);
+			BufferUploader.invalidate();
 		}
 	}
 
@@ -422,7 +481,9 @@ final class LodRenderer {
 		long key = LodWorld.key(level, nx, nz);
 		Node node = nodes.get(key);
 		// Nodes the game's own chunks cover completely (with a pack, those near the player: see PACK_UNDER).
-		if (level <= 1 && covered(x0, z0, size) && (!forPack || farthest(x0, z0, size) < PACK_UNDER * viewDistance * 16)) {
+		// Those near the circle's edge are made anyway (the mask hides them), ready for when the game lets go of them.
+		if (level <= 1 && covered(x0, z0, size) && deepInside(x0, z0, size)
+				&& (!forPack || farthest(x0, z0, size) < PACK_UNDER * viewDistance * 16)) {
 			if (node != null) node.usedFrame = frame;
 			return;
 		}
@@ -437,10 +498,7 @@ final class LodRenderer {
 			if (node.version < 0) request(level, nx, nz, distance);
 			else if (now - node.builtAt > REBUILD_AFTER << Math.min(level, 3)) request(level, nx, nz, distance + STALE_PENALTY);
 		}
-		if (node.quads > 0 && node.vertices != null) {
-			draws.add(node);
-			maxQuads = Math.max(maxQuads, node.quads);
-		}
+		if (node.quads > 0 && node.array != 0) draws.add(node);
 	}
 
 	private void request(int level, int nx, int nz, double priority) {
@@ -494,16 +552,15 @@ final class LodRenderer {
 	/**
 	 * Which chunks the game draws. Asking the game is slow (a cache miss or more a chunk, 4,800 chunks at render distance
 	 * 32: a fifth of the render thread when all were asked every frame), so it's asked where something changed: a chunk
-	 * whose sections got or lost a mesh ({@link #sectionChanged}) every frame until it has one (a section is drawn once
-	 * it's faded in a bit, so this takes a few frames) or its time is up; a chunk that unloads is cleared at once
-	 * ({@link #chunkGone}). Every chunk is also asked one row in {@link #MASK_ROWS} a frame, and all of them on the
-	 * first frame.
+	 * whose sections got or lost a mesh ({@link #sectionChanged}) every frame until it has one or its time is up; a chunk
+	 * that unloads is cleared at once ({@link #chunkGone}). Every chunk is also asked one row in {@link #MASK_ROWS} a
+	 * frame, and all of them on the first frame.
 	 * <p>
-	 * A mesh isn't enough: the game draws only the chunks inside a circle around the camera's chunk, and only the
-	 * sections so many above and below the camera's. It keeps meshes outside those (and chunks loaded around them), and
-	 * where neither drew them they showed as gaps between the game's chunks and the far terrain.
+	 * A mesh isn't enough: the game draws only the chunks inside a circle around the camera's chunk (and FpsTarget may
+	 * draw fewer). It keeps meshes outside it (and chunks loaded around it), and where neither drew them they showed as
+	 * gaps between the game's chunks and the far terrain.
 	 */
-	private void updateMask(Minecraft mc, LevelRenderer levelRenderer, ClientLevel level, int cx, int cy, int cz, int rd) {
+	private void updateMask(LevelRenderer levelRenderer, ClientLevel level, int cx, int cz, int rd) {
 		int r = rd + 2;
 		int minX = cx - r, maxX = cx + r, minZ = cz - r, maxZ = cz + r;
 		if (hasSquare && (minX != vMinX || minZ != vMinZ || maxX != vMaxX || maxZ != vMaxZ)) {
@@ -526,45 +583,39 @@ final class LodRenderer {
 		vMaxZ = maxZ;
 		boolean first = !hasSquare;
 		hasSquare = true;
-		int minSection = world.minY >> 4;
-		int lo = Mth.clamp(cy - rd - minSection, 0, 255), hi = Mth.clamp(cy + rd + 1 - minSection, 0, 255);
-		boolean moved = false;
-		if (lo != bandLo || hi != bandHi) {
-			bandLo = lo;
-			bandHi = hi;
-			viewChanged = moved = true;
-		}
-		if (rd != viewDistance || cx != viewX || cz != viewZ) {
-			viewDistance = rd;
-			viewX = cx;
-			viewZ = cz;
-			moved = true;
-		}
+		// 1.21.1 draws every section of a chunk it draws, top to bottom.
+		bandLo = 0;
+		bandHi = Mth.clamp(world.height >> 4, 0, 255);
+		int cap = FpsTarget.drawCap();
+		boolean moved = rd != viewDistance || cx != viewX || cz != viewZ || cap != viewCap;
+		viewDistance = rd;
+		viewX = cx;
+		viewZ = cz;
+		viewCap = cap;
 		// What the game draws moved: the mask follows from what's known of the chunks.
 		if (moved && !first) {
 			for (int z = minZ; z <= maxZ; z++) {
 				for (int x = minX; x <= maxX; x++) refresh(x, z);
 			}
 		}
-		long fade = Util.toMillis(mc.options.chunkSectionFadeInTime().get());
 		long millis = Util.getMillis();
 		synchronized (changedChunks) {
-			for (int k = 0; k < changedChunks.size(); k++) watched.put(changedChunks.getLong(k), millis + fade + WATCH_AFTER_FADE);
+			for (int k = 0; k < changedChunks.size(); k++) watched.put(changedChunks.getLong(k), millis + WATCH_FOR);
 			changedChunks.clear();
 		}
 		for (ObjectIterator<Long2LongMap.Entry> it = watched.long2LongEntrySet().fastIterator(); it.hasNext(); ) {
 			Long2LongMap.Entry e = it.next();
 			int x = (int) (e.getLongKey() >> 32), z = (int) e.getLongKey();
-			if (x < minX || x > maxX || z < minZ || z > maxZ || ask(levelRenderer, level, x, z, fade) || millis > e.getLongValue()) it.remove();
+			if (x < minX || x > maxX || z < minZ || z > maxZ || ask(levelRenderer, level, x, z) || millis > e.getLongValue()) it.remove();
 		}
 		int z0 = first ? minZ : minZ + Math.floorMod(frame - minZ, MASK_ROWS), step = first ? 1 : MASK_ROWS;
 		for (int z = z0; z <= maxZ; z += step) {
-			for (int x = minX; x <= maxX; x++) ask(levelRenderer, level, x, z, fade);
+			for (int x = minX; x <= maxX; x++) ask(levelRenderer, level, x, z);
 		}
 	}
 
-	/** Asks the game whether it has a mesh for the chunk (in a section it draws), into the mask; true if it has. */
-	private boolean ask(LevelRenderer levelRenderer, ClientLevel level, int x, int z, long fade) {
+	/** Asks the game whether it has a mesh for the chunk, into the mask; true if it has. */
+	private boolean ask(LevelRenderer levelRenderer, ClientLevel level, int x, int z) {
 		byte has = 0;
 		int i = (z & 255) << 8 | (x & 255);
 		LevelChunk chunk = level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false);
@@ -575,15 +626,17 @@ final class LodRenderer {
 					Math.min(chunk.getHeight(surface, 0, 15), chunk.getHeight(surface, 15, 15)));
 			top[i] = (byte) Mth.clamp(chunk.getHighestFilledSectionIndex() + 1, 0, 255);
 			ground[i] = (byte) Mth.clamp((low - world.minY) >> 4, 0, 255);
-			y = Math.min(Math.max(y, world.minY + bandLo * 16), world.minY + bandHi * 16 - 1);
-			y = Mth.clamp(y, level.getMinY(), level.getMaxY());
-			if (levelRenderer.isSectionCompiledAndVisible(probe.set(x * 16 + 8, y, z * 16 + 8), fade)) has = 1;
+			y = Mth.clamp(y, level.getMinBuildHeight(), level.getMaxBuildHeight() - 1);
+			// The section at its surface. The game's grid of sections wraps around, but only past the circle it draws,
+			// where the mask has 0 anyway.
+			if (levelRenderer.isSectionCompiled(probe.set(x * 16 + 8, y, z * 16 + 8))) has = 1;
 		}
 		compiled[i] = has;
 		refresh(x, z);
 		// Loaded, and the far terrain shows (some of) it: copied now, not when it unloads. A shader pack may show it under the
 		// game's chunks too.
-		if (chunk != null && (mask[i] != 1 || forPack)) {
+		// Near the edge of the game's circle too: the far terrain has it ready when the player moves and the game lets go of it.
+		if (chunk != null && (mask[i] != 1 || forPack || !deepInside(x, z))) {
 			long key = chunkKey(x, z);
 			if (!copied.contains(key)) toCopy.add(key);
 		}
@@ -599,9 +652,23 @@ final class LodRenderer {
 		return (top[i] & 255) > bandHi || (ground[i] & 255) < bandLo ? 2 : 1;
 	}
 
-	/** Whether the game draws chunks there: the same test as its own. */
+	/** How many chunks in from the edge of the game's circle the far terrain is kept ready under it. */
+	private static final int EDGE = 3;
+
+	/** Whether the chunk is more than EDGE chunks inside the circle the game draws. */
+	private boolean deepInside(int x, int z) {
+		return ChunkTrackingView.isInViewDistance(viewX, viewZ, viewDistance - EDGE, x, z) && FpsTarget.drawnWithin(viewX, viewZ, x, z, EDGE);
+	}
+
+	/** Whether every chunk of a square is more than EDGE chunks inside the circle the game draws. */
+	private boolean deepInside(int x0, int z0, int size) {
+		int a = x0 >> 4, b = (x0 + size - 1) >> 4, c = z0 >> 4, d = (z0 + size - 1) >> 4;
+		return deepInside(a, c) && deepInside(a, d) && deepInside(b, c) && deepInside(b, d);
+	}
+
+	/** Whether the game draws chunks there: the same test as its own, and FpsTarget's. */
 	private boolean inCircle(int x, int z) {
-		return ChunkTrackingView.isInViewDistance(viewX, viewZ, viewDistance, x, z);
+		return ChunkTrackingView.isInViewDistance(viewX, viewZ, viewDistance, x, z) && FpsTarget.drawn(viewX, viewZ, x, z);
 	}
 
 	private void refresh(int x, int z) {
@@ -660,14 +727,26 @@ final class LodRenderer {
 
 	private void receive() {
 		long budget = UPLOAD_BUDGET;
-		while (budget > 0) {
-			LodWorker.Result result = worker.results.poll();
-			if (result == null) break;
-			LodMesher.Mesh mesh = result.mesh();
-			try {
-				if (result.request().world == world) budget -= upload(mesh);
-			} finally {
-				mesh.free();
+		boolean any = false;
+		try {
+			while (budget > 0) {
+				LodWorker.Result result = worker.results.poll();
+				if (result == null) break;
+				LodMesher.Mesh mesh = result.mesh();
+				try {
+					if (result.request().world == world) {
+						budget -= upload(mesh);
+						any = true;
+					}
+				} finally {
+					mesh.free();
+				}
+			}
+		} finally {
+			if (any) {
+				GlStateManager._glBindVertexArray(0);
+				GlStateManager._glBindBuffer(GL_ARRAY_BUFFER, 0);
+				BufferUploader.invalidate();
 			}
 		}
 	}
@@ -691,13 +770,15 @@ final class LodRenderer {
 		if (mesh.quads() == 0) return 0;
 		long bytes = (long) mesh.quads() * 4 * VERTEX_BYTES;
 		ByteBuffer data = MemoryUtil.memByteBuffer(mesh.vertices(), (int) bytes);
-		node.vertices = RenderSystem.getDevice().createBuffer(() -> "Afterburner far terrain", GpuBuffer.USAGE_VERTEX, data);
-		int size = LodMesher.NODE * scale;
-		infoData.clear();
-		infoData.putInt(mesh.nx() * size).putInt(world.minY).putInt(mesh.nz() * size).putInt(scale);
-		infoData.putInt(mesh.level() <= 1 ? 1 : 0).putInt(0).putInt(0).putInt(0);
-		infoData.flip();
-		node.info = RenderSystem.getDevice().createBuffer(() -> "Afterburner far terrain node", GpuBuffer.USAGE_UNIFORM, infoData);
+		node.buffer = GlStateManager._glGenBuffers();
+		node.array = GlStateManager._glGenVertexArrays();
+		GlStateManager._glBindVertexArray(node.array);
+		GlStateManager._glBindBuffer(GL_ARRAY_BUFFER, node.buffer);
+		GlStateManager._glBufferData(GL_ARRAY_BUFFER, data, GL_STATIC_DRAW);
+		GlStateManager._enableVertexAttribArray(0);
+		GlStateManager._vertexAttribIPointer(0, 1, GL_UNSIGNED_INT, VERTEX_BYTES, 0);
+		GlStateManager._enableVertexAttribArray(1);
+		GlStateManager._vertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, true, VERTEX_BYTES, 4);
 		return bytes;
 	}
 
@@ -721,11 +802,9 @@ final class LodRenderer {
 		nodes.clear();
 		draws.clear();
 		worker.requests.values().removeIf(r -> r.world == world && !r.taken.get());
-		if (maskBuffer != null) maskBuffer.close();
-		if (viewBuffer != null) viewBuffer.close();
-		maskBuffer = viewBuffer = null;
+		if (maskTexture != 0) glDeleteTextures(maskTexture);
+		if (maskBuffer != 0) GlStateManager._glDeleteBuffers(maskBuffer);
+		maskBuffer = maskTexture = 0;
 		MemoryUtil.memFree(maskData);
-		MemoryUtil.memFree(infoData);
-		MemoryUtil.memFree(viewData);
 	}
 }

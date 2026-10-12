@@ -28,7 +28,7 @@ public final class TickCommand {
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context,
 			Commands.CommandSelection selection) {
 		dispatcher.register(Commands.literal("afterburner-tick")
-				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+				.requires(source -> source.hasPermission(Commands.LEVEL_GAMEMASTERS))
 				.executes(c -> run(c.getSource(), 30))
 				.then(Commands.argument("seconds", IntegerArgumentType.integer(5, 600))
 						.executes(c -> run(c.getSource(), IntegerArgumentType.getInteger(c, "seconds")))));

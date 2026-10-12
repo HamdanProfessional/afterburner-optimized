@@ -3,23 +3,23 @@ package com.afterburner.bench;
 import com.afterburner.Afterburner;
 import com.afterburner.worldgen.ClimateIndex;
 import com.afterburner.worldgen.FreeSpace;
-import com.afterburner.worldgen.OreVeinShare;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
-import net.minecraft.core.Registry;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.Util;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
@@ -31,21 +31,33 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class ChunkCommand {
 	/** Holds the chunks loaded while measuring. It doesn't save, so a crash mid-benchmark can't leave chunks loaded. */
-	public static final TicketType TICKET = Registry.register(BuiltInRegistries.TICKET_TYPE, Afterburner.id("benchmark"),
-			new TicketType(TicketType.NO_TIMEOUT, TicketType.FLAG_LOADING));
+	public static final TicketType<ChunkPos> TICKET = TicketType.create("afterburner_benchmark", Comparator.comparingLong(ChunkPos::toLong));
 	private static boolean running;
 
 	private ChunkCommand() {
 	}
 
 	public static void init() {
-		// Loading the class registers the ticket type while registries are still open.
+	}
+
+	/**
+	 * Keeps the chunk loaded (and generated, if it wasn't) until {@link #release}; done when it's loaded. Asked for from
+	 * another thread, as on the server thread the game waits for each chunk before going on to the next.
+	 */
+	public static CompletableFuture<?> load(ServerChunkCache chunks, ChunkPos pos) {
+		chunks.addRegionTicket(TICKET, pos, 0, pos);
+		return CompletableFuture.supplyAsync(() -> chunks.getChunkFuture(pos.x, pos.z, ChunkStatus.FULL, true), Util.backgroundExecutor())
+				.thenCompose(future -> future);
+	}
+
+	public static void release(ServerChunkCache chunks, ChunkPos pos) {
+		chunks.removeRegionTicket(TICKET, pos, 0, pos);
 	}
 
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context,
 			Commands.CommandSelection selection) {
 		dispatcher.register(Commands.literal("afterburner-chunks")
-				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+				.requires(source -> source.hasPermission(Commands.LEVEL_GAMEMASTERS))
 				.then(Commands.argument("radius", IntegerArgumentType.integer(1, 64))
 						.executes(c -> {
 							ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -81,14 +93,14 @@ public final class ChunkCommand {
 			for (int dx = -radius; dx <= radius; dx++) {
 				ChunkPos pos = new ChunkPos(cx + dx, cz + dz);
 				positions.add(pos);
-				futures.add(chunks.addTicketAndLoadWithRadius(TICKET, pos, 0));
+				futures.add(load(chunks, pos));
 			}
 		}
 
 		CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).whenCompleteAsync((ignored, error) -> {
 			double seconds = (System.nanoTime() - start) / 1e9;
 			long[] tickTimes = ticks.stop();
-			for (ChunkPos pos : positions) chunks.removeTicketWithRadius(TICKET, pos, 0);
+			for (ChunkPos pos : positions) release(chunks, pos);
 			running = false;
 			if (error != null) {
 				source.sendFailure(Component.literal("Chunk benchmark failed: " + error));
@@ -108,7 +120,6 @@ public final class ChunkCommand {
 					"Worker threads: " + (Runtime.getRuntime().availableProcessors() - 1) + ", " + Reports.modsLine()));
 			if (FreeSpace.CHECK) lines.add(FreeSpace.summary());
 			if (ClimateIndex.CHECK) lines.add(ClimateIndex.summary());
-			if (OreVeinShare.CHECK) lines.add(OreVeinShare.summary());
 			String saved = Reports.write("chunks", lines);
 			source.sendSuccess(() -> Component.literal("Chunk benchmark done").withStyle(ChatFormatting.GOLD), true);
 			for (String line : lines) source.sendSuccess(() -> Component.literal(line), true);

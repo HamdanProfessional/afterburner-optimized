@@ -165,8 +165,8 @@ final class LodWorld {
 		if (id >= biomes.length) biomes = Arrays.copyOf(biomes, Math.max(id + 1, biomes.length * 2));
 		Biome b = biomes[id];
 		if (b == null) {
-			b = biomeRegistry.getValue(biomeNames.get(id));
-			if (b == null) b = biomeRegistry.getValue(ResourceLocation.withDefaultNamespace("plains"));
+			b = biomeRegistry.get(biomeNames.get(id));
+			if (b == null) b = biomeRegistry.get(ResourceLocation.withDefaultNamespace("plains"));
 			biomes[id] = b;
 		}
 		return b;
@@ -180,7 +180,7 @@ final class LodWorld {
 				for (int i = 2; i < lines.size(); i++) {
 					BlockState state;
 					try {
-						state = BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, lines.get(i), false).blockState();
+						state = BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK.asLookup(), lines.get(i), false).blockState();
 					} catch (CommandSyntaxException e) {
 						// A block this game doesn't have: drawn as the hidden placeholder.
 						state = Blocks.STONE.defaultBlockState();

@@ -22,7 +22,7 @@ public final class FrameRecorder {
 	/** Called at the start of every frame. */
 	public static void onFrame(Minecraft mc) {
 		long now = System.nanoTime();
-		boolean inGame = mc.level != null && mc.gui.screen() == null;
+		boolean inGame = mc.level != null && mc.screen == null;
 		Run r = run;
 		if (r != null) {
 			if (mc.level == null) {
@@ -66,7 +66,7 @@ public final class FrameRecorder {
 			int second = (int) (recorded / 1_000_000_000L);
 			if (second != shownSecond && mc.player != null) {
 				shownSecond = second;
-				mc.player.sendOverlayMessage(Component.literal("Benchmarking: " + second + " / " + length / 1_000_000_000L + " s"));
+				mc.gui.setOverlayMessage(Component.literal("Benchmarking: " + second + " / " + length / 1_000_000_000L + " s"), false);
 			}
 			if (recorded >= length) {
 				run = null;

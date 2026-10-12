@@ -7,6 +7,7 @@ import com.afterburner.client.perf.FpsTarget;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.StringWidget;
@@ -53,7 +54,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 	@Override
 	protected void addOptions() {
 		buttons.clear();
-		list.addSmall(List.of(new StringWidget(Component.translatable("afterburner.group.fpsTarget").withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
+		list.addSmall(List.of(header(Component.translatable("afterburner.group.fpsTarget"), font)));
 		list.addBig(fpsTargetSlider());
 		Addons.addSettings(new Rows() {
 			@Override
@@ -63,7 +64,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 
 			@Override
 			public void header(String key) {
-				list.addSmall(List.of(new StringWidget(Component.translatable(key).withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
+				list.addSmall(List.of(SettingsScreen.header(Component.translatable(key), font)));
 			}
 
 			@Override
@@ -82,8 +83,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 			if (f.group() != group) {
 				addRow(row);
 				group = f.group();
-				list.addSmall(List.of(new StringWidget(Component.translatable("afterburner.group." + group.name().toLowerCase(Locale.ROOT))
-						.withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font)));
+				list.addSmall(List.of(header(Component.translatable("afterburner.group." + group.name().toLowerCase(Locale.ROOT)), font)));
 			}
 			Tooltip tooltip = tooltip(f);
 			OptionInstance<Boolean> button = OptionInstance.createBoolean("afterburner.option." + f.key(), value -> tooltip,
@@ -93,6 +93,14 @@ public final class SettingsScreen extends OptionsSubScreen {
 		}
 		addRow(row);
 		refresh();
+	}
+
+	/**
+	 * A group's title, centred over the row as later versions' option list headers are (1.21.1's list has none: a widget
+	 * as wide as a row of buttons, its text in the middle).
+	 */
+	public static StringWidget header(Component title, Font font) {
+		return new StringWidget(310, 20, title.copy().withStyle(ChatFormatting.UNDERLINE, ChatFormatting.BOLD), font).alignCenter();
 	}
 
 	/** Off at the far left, then {@link FpsTarget#CHOICES}. */

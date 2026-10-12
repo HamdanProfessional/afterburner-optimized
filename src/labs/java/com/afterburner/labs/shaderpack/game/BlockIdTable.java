@@ -22,7 +22,7 @@ final class BlockIdTable {
 		for (BlockIdRules.Rule rule : rules.rules) {
 			ResourceLocation id = ResourceLocation.tryBuild(rule.namespace(), rule.path());
 			if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) continue;
-			Block block = BuiltInRegistries.BLOCK.getValue(id);
+			Block block = BuiltInRegistries.BLOCK.get(id);
 			if (block == null) continue;
 			for (BlockState state : block.getStateDefinition().getPossibleStates()) {
 				if (!matches(block, state, rule.properties())) continue;

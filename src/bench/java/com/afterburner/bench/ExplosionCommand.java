@@ -13,17 +13,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
+import net.minecraft.world.entity.projectile.WitherSkull;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.EntityBasedExplosionDamageCalculator;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.ExplosionDamageCalculator;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.ServerExplosion;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -53,7 +50,7 @@ public final class ExplosionCommand {
 	public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext context,
 			Commands.CommandSelection selection) {
 		dispatcher.register(Commands.literal("afterburner-explosions")
-				.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+				.requires(source -> source.hasPermission(Commands.LEVEL_GAMEMASTERS))
 				.executes(c -> run(c.getSource(), 300))
 				.then(Commands.argument("count", IntegerArgumentType.integer(1, 2000))
 						.executes(c -> run(c.getSource(), IntegerArgumentType.getInteger(c, "count")))));
@@ -64,7 +61,7 @@ public final class ExplosionCommand {
 		List<CompletableFuture<?>> loads = new ArrayList<>();
 		for (int cz = (Z - 16) >> 4; cz <= (Z + 16) >> 4; cz++) {
 			for (int cx = (X - 16) >> 4; cx <= (X + 16) >> 4; cx++) {
-				loads.add(level.getChunkSource().addTicketAndLoadWithRadius(ChunkCommand.TICKET, new ChunkPos(cx, cz), 0));
+				loads.add(ChunkCommand.load(level.getChunkSource(), new ChunkPos(cx, cz)));
 			}
 		}
 		source.sendSuccess(() -> Component.literal("Blowing up " + count + " cubes...").withStyle(ChatFormatting.GRAY), true);
@@ -92,7 +89,7 @@ public final class ExplosionCommand {
 			Entity source = source(level, i % 5, center);
 			float radius = i % 3 == 0 ? 7.0F : i % 5 == 4 ? 1.0F : 4.0F;
 			ExplosionDamageCalculator calculator = source == null ? new ExplosionDamageCalculator() : new EntityBasedExplosionDamageCalculator(source);
-			Explosion explosion = new ServerExplosion(level, source, null, null, center, radius, false, Explosion.BlockInteraction.DESTROY);
+			Explosion explosion = new Explosion(level, source, center.x, center.y, center.z, radius, false, Explosion.BlockInteraction.DESTROY);
 			long[] result = ExplosionRays.compare(explosion, level, center, radius, calculator, random, i % 2 == 0);
 			if (result[2] == 0) different++;
 			if (i >= WARMUP) {
@@ -117,14 +114,14 @@ public final class ExplosionCommand {
 	/** By turns: none, TNT, a creeper, a TNT minecart, a wither skull (that breaks what withers break). */
 	private static Entity source(ServerLevel level, int kind, Vec3 at) {
 		EntityType<?> type = switch (kind) {
-			case 1 -> EntityTypes.TNT;
-			case 2 -> EntityTypes.CREEPER;
-			case 3 -> EntityTypes.TNT_MINECART;
-			case 4 -> EntityTypes.WITHER_SKULL;
+			case 1 -> EntityType.TNT;
+			case 2 -> EntityType.CREEPER;
+			case 3 -> EntityType.TNT_MINECART;
+			case 4 -> EntityType.WITHER_SKULL;
 			default -> null;
 		};
 		if (type == null) return null;
-		Entity entity = type.create(level, EntitySpawnReason.COMMAND);
+		Entity entity = type.create(level);
 		entity.setPos(at);
 		if (entity instanceof WitherSkull skull) skull.setDangerous(true);
 		return entity;

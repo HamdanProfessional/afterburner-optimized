@@ -3,19 +3,19 @@ package com.afterburner.labs.shaderpack.game;
 import com.afterburner.labs.lod.Lod;
 import com.afterburner.labs.shaderpack.PackUniforms;
 import com.afterburner.labs.shaderpack.TranslateTarget;
+import com.mojang.blaze3d.systems.RenderSystem;
 import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.renderer.EndFlashState;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.util.Mth;
-import net.minecraft.world.attribute.EnvironmentAttributeProbe;
-import net.minecraft.world.attribute.EnvironmentAttributes;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.HumanoidArm;
@@ -25,14 +25,12 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LightLayer;
-import net.minecraft.world.level.MoonPhase;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.material.FogType;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
-import org.joml.Vector3fc;
 import org.joml.Vector4f;
 import org.jspecify.annotations.Nullable;
 
@@ -41,16 +39,9 @@ import org.jspecify.annotations.Nullable;
  * {@link PackUniforms.Inputs}: what custom uniforms read and what the uniform blocks are filled with.
  * <p>
  * Matrices follow OptiFine: gbufferModelView is the camera's rotation (world geometry is drawn camera-relative), gbufferProjection
- * a normal OpenGL projection (near -1, far 1), not the game's reversed one.
+ * the game's projection (OpenGL's, near -1, far 1).
  */
 public final class FrameUniforms implements PackUniforms.Inputs {
-	/** Turns the game's reversed-depth projection into an OpenGL one; the CPU side of the translator's ab_ToGl. */
-	public static Matrix4f toGl(boolean zeroToOne) {
-		return zeroToOne
-			? new Matrix4f(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -2, 0, 0, 0, 1, 1)
-			: new Matrix4f(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1);
-	}
-
 	/** The steps a kept shadow map turns in, per turn of the sky (a day). */
 	private static final double SUN_STEPS = 3600.0;
 
@@ -63,7 +54,6 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 	private double eyeBlockSmooth;
 	private double eyeSkySmooth;
 	private boolean smoothStarted;
-	private double endFlash;
 	private final Matrix4f previousModelView = new Matrix4f();
 	private final Matrix4f previousProjection = new Matrix4f();
 	/** Distant Horizons' projection (the far terrain's): gbufferProjection with its own near and far planes. */
@@ -71,6 +61,8 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 	private final Matrix4f previousDhProjection = new Matrix4f();
 	private double[] previousCamera = {0, 0, 0};
 	private boolean hasPrevious;
+	/** The camera's view (gbufferModelView) this frame. */
+	final Matrix4f modelView = new Matrix4f();
 	/** The shadow map's view and projection this frame (shadowModelView, shadowProjection); set while there's a world. */
 	final Matrix4f shadowView = new Matrix4f();
 	final Matrix4f shadowProjection = new Matrix4f();
@@ -96,11 +88,10 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 	}
 
 	/**
-	 * Computes the frame's values. {@code projection} is the game's world projection (reversed depth), {@code viewRotation}
-	 * the camera's rotation matrix, {@code width}/{@code height} the size of the world's render target.
+	 * Computes the frame's values. {@code projection} is the game's world projection, {@code viewRotation} the camera's rotation
+	 * matrix, {@code width}/{@code height} the size of the world's render target.
 	 */
-	public void update(Minecraft mc, Camera camera, float partialTick, Matrix4fc projection, Matrix4fc viewRotation, boolean zeroToOne,
-			int width, int height) {
+	public void update(Minecraft mc, Camera camera, float partialTick, Matrix4fc projection, Matrix4fc viewRotation, int width, int height) {
 		ClientLevel level = mc.level;
 		LocalPlayer player = mc.player;
 		this.hasShadow = false;
@@ -118,11 +109,11 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.put("near", 0.05);
 		this.put("far", mc.options.getEffectiveRenderDistance() * 16.0);
 		this.put("screenBrightness", mc.options.gamma().get());
-		this.put("hideGUI", mc.gameRenderer.gameRenderState().guiRenderState.isHudHidden ? 1 : 0);
+		this.put("hideGUI", mc.options.hideGui ? 1 : 0);
 
 		// Matrices.
-		Matrix4f modelView = new Matrix4f(viewRotation);
-		Matrix4f glProjection = toGl(zeroToOne).mul(projection);
+		Matrix4f modelView = this.modelView.set(viewRotation);
+		Matrix4f glProjection = new Matrix4f(projection);
 		this.putMatrix("gbufferModelView", modelView);
 		this.putMatrix("gbufferModelViewInverse", new Matrix4f(modelView).invert());
 		this.putMatrix("gbufferProjection", glProjection);
@@ -133,7 +124,7 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.previousProjection.set(glProjection);
 		this.farTerrain(mc, glProjection);
 
-		var position = camera.position();
+		Vec3 position = camera.getPosition();
 		double[] cameraPosition = {position.x, position.y, position.z};
 		double[] previousCamera = this.hasPrevious ? this.previousCamera : cameraPosition;
 		this.put("cameraPosition", cameraPosition);
@@ -148,25 +139,23 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.hasPrevious = true;
 
 		if (level == null || player == null) return;
-		var eyePosition = player.getEyePosition(partialTick);
+		Vec3 eyePosition = player.getEyePosition(partialTick);
 		this.put("eyePosition", eyePosition.x, eyePosition.y, eyePosition.z);
 		this.put("relativeEyePosition", position.x - eyePosition.x, position.y - eyePosition.y, position.z - eyePosition.z);
-		EnvironmentAttributeProbe probe = camera.attributeProbe();
 
-		// Time and sky.
-		long clock = level.getDefaultClockTime();
-		if (clock == 0) clock = level.getOverworldClockTime();
+		// Time and sky: the sky turns by the time of day (0 at noon), the moon opposite the sun.
+		long clock = level.getDayTime();
 		this.put("worldTime", Math.floorMod(clock, 24000L));
 		this.put("worldDay", Math.floorDiv(clock, 24000L));
-		MoonPhase moonPhase = probe.getValue(EnvironmentAttributes.MOON_PHASE, partialTick);
-		this.put("moonPhase", moonPhase.index());
-		double skyAngle = frac(probe.getValue(EnvironmentAttributes.SUN_ANGLE, partialTick) / 360.0);
+		this.put("moonPhase", level.getMoonPhase());
+		double skyAngle = frac(level.getTimeOfDay(partialTick));
 		double sunAngle = skyAngle < 0.75 ? skyAngle + 0.25 : skyAngle - 0.75;
 		this.put("sunAngle", sunAngle);
 		this.put("shadowAngle", sunAngle <= 0.5 ? sunAngle : sunAngle - 0.5);
 		float sunPath = (float) number("sunPathRotation", 0.0);
-		double[] sun = celestial(modelView, sunPath, probe.getValue(EnvironmentAttributes.SUN_ANGLE, partialTick));
-		double[] moon = celestial(modelView, sunPath, probe.getValue(EnvironmentAttributes.MOON_ANGLE, partialTick));
+		float sunDegrees = (float) (skyAngle * 360.0);
+		double[] sun = celestial(modelView, sunPath, sunDegrees);
+		double[] moon = celestial(modelView, sunPath, sunDegrees + 180.0F);
 		this.put("sunPosition", sun);
 		this.put("moonPosition", moon);
 		this.put("shadowLightPosition", sunAngle <= 0.5 ? sun : moon);
@@ -184,8 +173,8 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		Matrix4f shadowView = new Matrix4f().translate(0, 0, -100).rotateX((float) Math.toRadians(90.0))
 			.rotateZ((float) Math.toRadians(shadowSky * -360.0)).rotateX((float) Math.toRadians(number("sunPathRotation", 0.0)));
 		if (interval > 0) {
-			shadowView.translate((float) (camera.position().x % interval) - interval / 2, (float) (camera.position().y % interval) - interval / 2,
-				(float) (camera.position().z % interval) - interval / 2);
+			shadowView.translate((float) (position.x % interval) - interval / 2, (float) (position.y % interval) - interval / 2,
+				(float) (position.z % interval) - interval / 2);
 		}
 		Matrix4f shadowProjection = new Matrix4f().setOrtho(-distance, distance, -distance, distance, 0.05F, 256.0F);
 		this.putMatrix("shadowModelView", shadowView);
@@ -199,10 +188,11 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.hasShadow = true;
 		Vector4f up = modelView.transform(new Vector4f(0, 100, 0, 0));
 		this.put("upPosition", up.x, up.y, up.z);
-		Vector3fc skyColor = probe.getValue(EnvironmentAttributes.SKY_COLOR, partialTick);
-		this.put("skyColor", skyColor.x(), skyColor.y(), skyColor.z());
-		Vector3fc fogColor = probe.getValue(EnvironmentAttributes.FOG_COLOR, partialTick);
-		this.put("fogColor", fogColor.x(), fogColor.y(), fogColor.z());
+		Vec3 skyColor = level.getSkyColor(position, partialTick);
+		this.put("skyColor", skyColor.x, skyColor.y, skyColor.z);
+		// The level's fog color: the game sets it (FogRenderer.setupColor) just before it clears the world, where the frame starts.
+		float[] fog = RenderSystem.getShaderFogColor();
+		this.put("fogColor", fog[0], fog[1], fog[2]);
 		double far = mc.options.getEffectiveRenderDistance() * 16.0;
 		this.put("fogMode", 9729);
 		this.put("fogShape", 0);
@@ -210,7 +200,7 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.put("fogEnd", far);
 		this.put("fogDensity", 1.0);
 		// gl_Fog outside the world passes (GlslTranslator.collectUniforms).
-		this.put("ab_fogColor", fogColor.x(), fogColor.y(), fogColor.z());
+		this.put("ab_fogColor", fog[0], fog[1], fog[2]);
 		this.put("ab_fogStart", far * 0.9);
 		this.put("ab_fogEnd", far);
 		this.put("ab_fogDensity", 1.0);
@@ -230,17 +220,17 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 			case POWDER_SNOW -> 3;
 			default -> 0;
 		});
-		this.put("nightVision", player.hasEffect(MobEffects.NIGHT_VISION) ? GameRenderer.nightVisionScale(player, partialTick) : 0.0);
-		this.put("blindness", player.getEffectBlendFactor(MobEffects.BLINDNESS, partialTick));
+		this.put("nightVision", player.hasEffect(MobEffects.NIGHT_VISION) ? GameRenderer.getNightVisionScale(player, partialTick) : 0.0);
+		this.put("blindness", blend(player, MobEffects.BLINDNESS, partialTick));
 		double darknessScale = mc.options.darknessEffectScale().get();
-		double darkness = player.getEffectBlendFactor(MobEffects.DARKNESS, partialTick) * darknessScale;
+		double darkness = blend(player, MobEffects.DARKNESS, partialTick) * darknessScale;
 		this.put("darknessFactor", darkness);
 		this.put("darknessLightFactor",
 			Math.max(0.0, Mth.cos((player.tickCount - partialTick) * (float) Math.PI * 0.025F) * 0.45 * darkness) * darknessScale);
 		this.put("playerMood", 0.0);
 		this.put("bossBattle", 0);
 
-		BlockPos eye = camera.blockPosition();
+		BlockPos eye = camera.getBlockPosition();
 		int blockLight = level.getBrightness(LightLayer.BLOCK, eye);
 		int skyLight = level.getBrightness(LightLayer.SKY, eye);
 		this.put("eyeBrightness", blockLight * 16, skyLight * 16);
@@ -259,12 +249,18 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.put("heldItemId2", -1);
 		this.put("heldBlockLightValue", lightValue(player.getMainHandItem()));
 		this.put("heldBlockLightValue2", lightValue(player.getOffhandItem()));
-		this.world(level, player, partialTick, position, modelView, probe);
+		this.world(level, player, partialTick, position);
 		this.player(mc, player, partialTick);
 	}
 
-	/** Iris's uniforms for the dimension, the weather, the biome the player is in, lightning and the End's flashes. */
-	private void world(ClientLevel level, LocalPlayer player, float partialTick, Vec3 camera, Matrix4fc modelView, EnvironmentAttributeProbe probe) {
+	/** How far an effect has faded in (blindness, darkness): 0 without it. */
+	private static double blend(LivingEntity entity, Holder<MobEffect> effect, float partialTick) {
+		MobEffectInstance instance = entity.getEffect(effect);
+		return instance != null ? instance.getBlendFactor(entity, partialTick) : 0.0;
+	}
+
+	/** Iris's uniforms for the dimension, the weather, the biome the player is in and lightning. */
+	private void world(ClientLevel level, LocalPlayer player, float partialTick, Vec3 camera) {
 		DimensionType dimension = level.dimensionType();
 		this.put("bedrockLevel", dimension.minY());
 		this.put("heightLimit", dimension.height());
@@ -273,7 +269,8 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.put("hasSkylight", flag(dimension.hasSkyLight()));
 		this.put("ambientLight", dimension.ambientLight());
 		this.put("seaLevel", level.getSeaLevel());
-		this.put("cloudHeight", probe.getValue(EnvironmentAttributes.CLOUD_HEIGHT, partialTick));
+		float cloudHeight = level.effects().getCloudHeight();
+		this.put("cloudHeight", Float.isNaN(cloudHeight) ? 192.0 : cloudHeight);
 		// How far the game's clouds have moved (its cloud texture is 256 cells wide; they wrap around after 400 ticks a cell).
 		this.put("cloudTime", (Math.floorMod(level.getGameTime(), 256L * 400L) + partialTick) * 0.03);
 		this.put("thunderStrength", Mth.clamp(level.getThunderLevel(partialTick), 0.0F, 1.0F));
@@ -289,27 +286,17 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		}
 		this.put("lightningBoltPosition", bolt);
 
-		// The End's flashes: how bright, and where in view space (100 blocks out, where the sky draws them).
-		EndFlashState flash = level.endFlashState();
-		double intensity = flash != null ? flash.getIntensity(partialTick) : 0.0;
-		this.put("previousEndFlashIntensity", this.endFlash);
-		this.put("endFlashIntensity", intensity);
-		this.endFlash = intensity;
-		if (flash != null) {
-			double x = Math.toRadians(flash.getXAngle()), y = Math.toRadians(flash.getYAngle());
-			Vector4f p = modelView.transform(new Vector4f((float) (-100.0 * Math.cos(x) * Math.sin(y)), (float) (-100.0 * Math.sin(x)),
-				(float) (100.0 * Math.cos(x) * Math.cos(y)), 0.0F), new Vector4f());
-			this.put("endFlashPosition", p.x, p.y, p.z);
-		} else {
-			this.put("endFlashPosition", 0, 0, 0);
-		}
+		// The End's flashes came after this version of the game: never one.
+		this.put("previousEndFlashIntensity", 0.0);
+		this.put("endFlashIntensity", 0.0);
+		this.put("endFlashPosition", 0, 0, 0);
 
 		// The biome at the player's feet.
 		BlockPos feet = player.blockPosition();
 		Holder<Biome> biome = level.getBiome(feet);
 		this.put("biome", PackBiomes.id(biome));
 		this.put("biome_category", PackBiomes.category(biome));
-		this.put("biome_precipitation", switch (biome.value().getPrecipitationAt(feet, level.getSeaLevel())) {
+		this.put("biome_precipitation", switch (biome.value().getPrecipitationAt(feet)) {
 			case NONE -> 0;
 			case RAIN -> 1;
 			case SNOW -> 2;
@@ -349,7 +336,7 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		this.put("is_on_ground", flag(player.onGround()));
 		this.put("isElytraFlying", flag(player.isFallFlying()));
 		this.put("isRiding", flag(player.isPassenger()));
-		this.put("feetInWater", flag(player.isInShallowWater()));
+		this.put("feetInWater", flag(player.isInWater() && !player.isUnderWater()));
 	}
 
 	private static double flag(boolean b) {
@@ -402,7 +389,6 @@ public final class FrameUniforms implements PackUniforms.Inputs {
 		return stack.getItem() instanceof BlockItem item ? item.getBlock().defaultBlockState().getLightEmission() : 0;
 	}
 
-	/** A celestial body 100 blocks out, in eye space: the sky renderer's transform applied to (0, 100, 0). */
 	/** Where the sun or moon is in view space, its path tilted by the pack's sunPathRotation as the shadow's view is. */
 	private static double[] celestial(Matrix4fc modelView, float sunPathRotation, float angleDegrees) {
 		Matrix4f m = new Matrix4f(modelView).rotateY((float) Math.toRadians(-90.0)).rotateZ((float) Math.toRadians(sunPathRotation))

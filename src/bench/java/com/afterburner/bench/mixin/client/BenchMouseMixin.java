@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /** Ignores the mouse during an automatic benchmark, like {@link BenchKeyboardMixin} the keyboard. */
 @Mixin(MouseHandler.class)
 public class BenchMouseMixin {
-	@Inject(method = {"onButton", "onScroll"}, at = @At("HEAD"), cancellable = true)
+	@Inject(method = {"onPress", "onScroll"}, at = @At("HEAD"), cancellable = true)
 	private void afterburner$ignoreDuringBenchmark(CallbackInfo ci) {
 		if (AutoBench.ignoresInput(true)) ci.cancel();
 	}

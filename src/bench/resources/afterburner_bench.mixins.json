@@ -10,14 +10,16 @@
 		"client.BenchKeyboardMixin",
 		"client.BenchMouseMixin",
 		"client.BuildCountMixin",
+		"client.BuildLogBlockMixin",
 		"client.BuildLogMixin",
 		"client.BuildTimeMixin",
 		"client.FrameSectionsMixin",
 		"client.FrameWaitsMixin",
-		"client.GpuTimerFrameGraphMixin",
 		"client.GpuTimerGameRendererMixin",
+		"client.GpuTimerLevelMixin",
 		"client.GpuTimerMinecraftMixin",
 		"client.GpuTimerTerrainMixin",
+		"client.VertexBufferAccessor",
 		"client.VisibilityTimeMixin"
 	],
 	"injectors": {

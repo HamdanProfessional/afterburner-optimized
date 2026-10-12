@@ -6,3 +6,15 @@ accessible	class	net/minecraft/world/level/biome/Biome$ClimateSettings
 accessible	field	net/minecraft/world/level/biome/Biome	climateSettings	Lnet/minecraft/world/level/biome/Biome$ClimateSettings;
 accessible	field	net/minecraft/world/level/chunk/ChunkAccess	levelHeightAccessor	Lnet/minecraft/world/level/LevelHeightAccessor;
 accessible	method	net/minecraft/world/level/NaturalSpawner	getRoughBiome	(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/chunk/ChunkAccess;)Lnet/minecraft/world/level/biome/Biome;
+accessible	class	net/minecraft/client/renderer/texture/SpriteContents$AnimatedTexture
+accessible	class	net/minecraft/client/renderer/texture/SpriteContents$FrameInfo
+accessible	class	net/minecraft/client/renderer/texture/SpriteContents$InterpolationData
+accessible	class	net/minecraft/client/renderer/texture/SpriteContents$Ticker
+accessible	method	net/minecraft/client/renderer/texture/SpriteContents$AnimatedTexture	uploadFrame	(III)V
+accessible	field	net/minecraft/client/renderer/texture/SpriteContents$AnimatedTexture	frames	Ljava/util/List;
+accessible	field	net/minecraft/client/renderer/texture/SpriteContents$FrameInfo	index	I
+accessible	class	net/minecraft/world/level/levelgen/SurfaceRules$Context
+accessible	method	net/minecraft/world/level/levelgen/SurfaceRules$Context	<init>	(Lnet/minecraft/world/level/levelgen/SurfaceSystem;Lnet/minecraft/world/level/levelgen/RandomState;Lnet/minecraft/world/level/chunk/ChunkAccess;Lnet/minecraft/world/level/levelgen/NoiseChunk;Ljava/util/function/Function;Lnet/minecraft/core/Registry;Lnet/minecraft/world/level/levelgen/WorldGenerationContext;)V
+accessible	method	net/minecraft/world/level/levelgen/SurfaceRules$Context	updateXZ	(II)V
+accessible	method	net/minecraft/world/level/levelgen/SurfaceRules$Context	updateY	(IIIIII)V
+accessible	class	net/minecraft/world/level/levelgen/SurfaceRules$SurfaceRule

@@ -7,15 +7,15 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Starts and ends each frame for {@link GpuTimers}. */
+/** Where a frame's GPU work starts and ends, for {@link GpuTimers}. */
 @Mixin(Minecraft.class)
 public class GpuTimerMinecraftMixin {
-	@Inject(method = "renderFrame", at = @At("HEAD"))
+	@Inject(method = "runTick", at = @At("HEAD"))
 	private void afterburner$frameStart(boolean advanceGameTime, CallbackInfo ci) {
 		GpuTimers.frameStart();
 	}
 
-	@Inject(method = "renderFrame", at = @At(value = "INVOKE", target = "Lcom/mojang/renderpearl/api/device/GpuSurface;present()V"))
+	@Inject(method = "runTick", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/platform/Window;updateDisplay()V"))
 	private void afterburner$frameEnd(boolean advanceGameTime, CallbackInfo ci) {
 		GpuTimers.frameEnd();
 	}

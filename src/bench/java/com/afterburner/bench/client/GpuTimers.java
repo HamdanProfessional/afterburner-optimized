@@ -1,7 +1,6 @@
 package com.afterburner.bench.client;
 
 import com.afterburner.bench.Reports;
-import com.mojang.blaze3d.systems.RenderSystem;
 import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL33C;
 
@@ -34,7 +33,8 @@ public final class GpuTimers {
 	}
 
 	private static boolean on() {
-		if (on == null) on = REQUESTED && RenderSystem.getDevice().getDeviceInfo().backendName().toLowerCase().contains("gl");
+		// 1.21.1 only draws with OpenGL.
+		if (on == null) on = REQUESTED;
 		return on;
 	}
 
