@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.At;
  * then shader packs' images, storage buffers and compute programs (colored lighting) can't run. So the newest of 4.6, 4.5
  * and 4.3 is asked for first, and 3.2 as the game does if the driver gives none of them. A 4.x core context runs everything
  * a 3.2 one does. A version the driver doesn't have is an error the game would crash on, so its error callback is left out
- * while those are tried. Only with {@code -Dafterburner.gl46=true} for now; macOS (whose OpenGL stops at 4.1) and phones
+ * while those are tried. {@code -Dafterburner.gl46=false} leaves it to the game; macOS (whose OpenGL stops at 4.1) and phones
  * (whose launcher turns OpenGL into OpenGL ES or Vulkan) are left alone.
  */
 @Mixin(Window.class)
@@ -25,8 +25,7 @@ public class GlContextVersionMixin {
 			target = "Lorg/lwjgl/glfw/GLFW;glfwCreateWindow(IILjava/lang/CharSequence;JJ)J"))
 	private long afterburner$newerContext(int width, int height, CharSequence title, long monitor, long share, Operation<Long> original) {
 		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-		// Opt-in for now: the terrain came out wrong with a 4.6 context on Intel's driver.
-		if (os.contains("mac") || Mobile.ACTIVE || !Boolean.getBoolean("afterburner.gl46")) return original.call(width, height, title, monitor, share);
+		if (os.contains("mac") || Mobile.ACTIVE || !Boolean.parseBoolean(System.getProperty("afterburner.gl46", "true"))) return original.call(width, height, title, monitor, share);
 		int[][] versions = {{4, 6}, {4, 5}, {4, 3}};
 		GLFWErrorCallback game = GLFW.glfwSetErrorCallback(null);
 		try {
