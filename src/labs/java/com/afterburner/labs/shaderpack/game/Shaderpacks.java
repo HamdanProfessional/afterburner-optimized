@@ -193,7 +193,6 @@ public final class Shaderpacks {
 	}
 
 	public static void select(String name) {
-		LOGGER.info("[Afterburner] Shader pack chosen: {} (was {})", name, selected, new Throwable("from"));
 		selected = name;
 		// Never a key: the next frame loads the pack, or drops the one loaded ("" is the key for none).
 		loadedFor = "\0";
@@ -467,7 +466,6 @@ public final class Shaderpacks {
 		}
 		String key = key(mc);
 		if (!key.equals(loadedFor)) {
-			LOGGER.info("[Afterburner] Shader pack key now \"{}\" (was \"{}\")", key, loadedFor);
 			loadedFor = key;
 			if (key.isEmpty()) {
 				cancelPreparing();
