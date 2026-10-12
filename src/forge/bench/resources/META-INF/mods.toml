@@ -1,0 +1,34 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="afterburner_bench"
+version="${mod_version}"
+displayName="Afterburner Bench"
+authors="${mod_authors}"
+description='''The benchmark and check commands used while developing Afterburner. For testing, not for play.'''
+
+[[dependencies.afterburner_bench]]
+	modId="forge"
+	mandatory=true
+	versionRange="${forge_version_range}"
+	ordering="NONE"
+	side="BOTH"
+
+[[dependencies.afterburner_bench]]
+	modId="minecraft"
+	mandatory=true
+	versionRange="${minecraft_version_range}"
+	ordering="NONE"
+	side="BOTH"
+
+[[dependencies.afterburner_bench]]
+	modId="afterburner"
+	mandatory=true
+	versionRange="[0,)"
+	ordering="NONE"
+	side="BOTH"
+
+[[mixins]]
+config="afterburner_bench.mixins.json"
