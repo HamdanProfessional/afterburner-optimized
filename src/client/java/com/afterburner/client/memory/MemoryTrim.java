@@ -6,6 +6,7 @@ import com.afterburner.client.render.Probe;
 import com.sun.management.HotSpotDiagnosticMXBean;
 import com.sun.management.VMOption;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.PauseScreen;
 
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
@@ -18,7 +19,7 @@ import java.lang.management.MemoryUsage;
  * returns it: only after a full clean-up, and only if more than 70% of what it holds is empty. So the game keeps showing
  * 1-1.5 GB of Java memory in Task Manager when it really needs a few hundred MB.
  * <p>
- * When the game has been paused (singleplayer) or in the background for 10 seconds, this runs one full clean-up and,
+ * When the game has sat on the pause menu (singleplayer) or in the background for 10 seconds, this runs one full clean-up and,
  * just for that clean-up, lets Java keep only 30% spare, so it returns the rest. That stops the game for about half a
  * second, which nobody sees while it's paused or behind another window. While playing, Java sizes its memory exactly as
  * in vanilla (keeping it small all the time makes it clean up more often, which made the slowest frames slower). It
@@ -56,7 +57,8 @@ public final class MemoryTrim {
 	/** Every frame, from the game loop. */
 	public static void onFrame(Minecraft mc) {
 		if (vm == null || Probe.get().busy()) return;
-		boolean idle = mc.isPaused() || !mc.isWindowActive();
+		// The options screens pause the game too, but someone is using them: half a second's stop there is seen.
+		boolean idle = !mc.isWindowActive() || mc.isPaused() && mc.gui.screen() instanceof PauseScreen;
 		if (!idle) {
 			idleSince = -1;
 			trimmed = false;

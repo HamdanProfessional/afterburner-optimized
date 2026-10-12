@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.util.context.ContextMap;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeResolver;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Blocks;
@@ -56,7 +57,7 @@ import java.util.List;
  */
 public final class FarLand {
 	/** Bumped when what's made changes, so land made by an older version is made again: 1 to 127. */
-	public static final int VERSION = 4;
+	public static final int VERSION = 5;
 	/** Palette places with a fixed meaning: air, and solid ground nothing sees. */
 	public static final int AIR = 0, HIDDEN = 1;
 	/** Surface rules are asked this many blocks down a cliff at most; below that it's the plain ground block. */
@@ -236,6 +237,8 @@ public final class FarLand {
 		private final MaterialRuleContext rules;
 		private final RuleEvaluator rule;
 		private final Long2ObjectOpenHashMap<Holder<Biome>> biomeMemo = new Long2ObjectOpenHashMap<>();
+		private final Long2ObjectOpenHashMap<Holder<Biome>> blockBiomeMemo = new Long2ObjectOpenHashMap<>();
+		private final BiomeManager zoom = new BiomeManager(this::noiseBiome, BiomeManager.obfuscateSeed(level.getSeed()));
 		private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		/** The preliminary surface on the generator's 16-block grid over the sheet, {@link #grid} points a side. */
 		private float[] prelimGrid = new float[0];
@@ -320,6 +323,7 @@ public final class FarLand {
 			shapeLo = shaping.lo();
 			shapeHi = shaping.hi();
 			biomeMemo.clear();
+			blockBiomeMemo.clear();
 			readPrelim(x0, z0, 16 << level);
 			for (int c = 0; c < 256; c++) prelims[c] = prelimAt(x0 + (c & 15) * s, z0 + (c >> 4) * s);
 			// The shaping to buildings is too sharp for samples 8 blocks apart: where there's some, block by block.
@@ -1073,13 +1077,13 @@ public final class FarLand {
 			return found;
 		}
 
-		/** The biome the generator picks there (without the blur between biomes a chunk gets). */
+		/** The biome a chunk gets there: the generator's, with the seeded blur between biomes the game's surface rules see. */
 		private Holder<Biome> biome(int x, int y, int z) {
-			long key = BlockPos.asLong(x >> 2, y >> 2, z >> 2);
-			Holder<Biome> biome = biomeMemo.get(key);
+			long key = BlockPos.asLong(x, y, z);
+			Holder<Biome> biome = blockBiomeMemo.get(key);
 			if (biome == null) {
-				biome = biomes.getNoiseBiome(x >> 2, y >> 2, z >> 2);
-				biomeMemo.put(key, biome);
+				biome = zoom.getBiome(new BlockPos(x, y, z));
+				blockBiomeMemo.put(key, biome);
 			}
 			return biome;
 		}

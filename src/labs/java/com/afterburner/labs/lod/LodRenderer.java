@@ -422,7 +422,9 @@ final class LodRenderer {
 		long key = LodWorld.key(level, nx, nz);
 		Node node = nodes.get(key);
 		// Nodes the game's own chunks cover completely (with a pack, those near the player: see PACK_UNDER).
-		if (level <= 1 && covered(x0, z0, size) && (!forPack || farthest(x0, z0, size) < PACK_UNDER * viewDistance * 16)) {
+		// Those near the circle's edge are made anyway (the mask hides them), ready for when the game lets go of them.
+		if (level <= 1 && covered(x0, z0, size) && deepInside(x0, z0, size)
+				&& (!forPack || farthest(x0, z0, size) < PACK_UNDER * viewDistance * 16)) {
 			if (node != null) node.usedFrame = frame;
 			return;
 		}
@@ -583,7 +585,8 @@ final class LodRenderer {
 		refresh(x, z);
 		// Loaded, and the far terrain shows (some of) it: copied now, not when it unloads. A shader pack may show it under the
 		// game's chunks too.
-		if (chunk != null && (mask[i] != 1 || forPack)) {
+		// Near the edge of the game's circle too: the far terrain has it ready when the player moves and the game lets go of it.
+		if (chunk != null && (mask[i] != 1 || forPack || !deepInside(x, z))) {
 			long key = chunkKey(x, z);
 			if (!copied.contains(key)) toCopy.add(key);
 		}
@@ -597,6 +600,20 @@ final class LodRenderer {
 	private int maskValue(int i, int x, int z) {
 		if (compiled[i] == 0 || !inCircle(x, z)) return 0;
 		return (top[i] & 255) > bandHi || (ground[i] & 255) < bandLo ? 2 : 1;
+	}
+
+	/** How many chunks in from the edge of the game's circle the far terrain is kept ready under it. */
+	private static final int EDGE = 3;
+
+	/** Whether the chunk is more than EDGE chunks inside the circle the game draws. */
+	private boolean deepInside(int x, int z) {
+		return ChunkTrackingView.isInViewDistance(viewX, viewZ, viewDistance - EDGE, x, z);
+	}
+
+	/** Whether every chunk of a square is more than EDGE chunks inside the circle the game draws. */
+	private boolean deepInside(int x0, int z0, int size) {
+		int a = x0 >> 4, b = (x0 + size - 1) >> 4, c = z0 >> 4, d = (z0 + size - 1) >> 4;
+		return deepInside(a, c) && deepInside(a, d) && deepInside(b, c) && deepInside(b, d);
 	}
 
 	/** Whether the game draws chunks there: the same test as its own. */
