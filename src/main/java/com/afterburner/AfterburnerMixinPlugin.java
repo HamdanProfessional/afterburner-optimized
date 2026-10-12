@@ -113,6 +113,7 @@ public class AfterburnerMixinPlugin implements IMixinConfigPlugin {
 			Map.entry("CullingPickMixin", Features.ENTITY_CULLING),
 			Map.entry("EntityOcclusionMixin", Features.ENTITY_CULLING),
 			Map.entry("BlockEntityOcclusionMixin", Features.ENTITY_CULLING),
+			Map.entry("AmbientBiomeMixin", Features.FAST_PARTICLES),
 			Map.entry("ParticleAccessor", Features.FAST_PARTICLES),
 			Map.entry("FrustumInvoker", Features.FAST_PARTICLES),
 			Map.entry("ParticleViewAccessor", Features.FAST_PARTICLES),

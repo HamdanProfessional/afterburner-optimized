@@ -10,6 +10,7 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.core.SectionPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
@@ -30,7 +31,12 @@ public class SectionScanMixin {
 			target = "Lnet/minecraft/world/level/lighting/LevelLightEngine;lightOnInSection(Lnet/minecraft/core/SectionPos;)Z"))
 	private boolean afterburner$lightOn(LevelLightEngine engine, SectionPos pos, Operation<Boolean> original,
 			@Local SectionRenderDispatcher.RenderSection section) {
-		return SectionScans.lightOn((LightWaitSection) section, () -> original.call(engine, pos));
+		LightWaitSection waiting = (LightWaitSection) section;
+		long chunk = ChunkPos.asLong(pos.x(), pos.z());
+		if (SectionScans.lightKnownOff(waiting, chunk)) return false;
+		boolean on = original.call(engine, pos);
+		SectionScans.lightAsked(waiting, on);
+		return on;
 	}
 
 	@ModifyExpressionValue(method = "renderLevel",

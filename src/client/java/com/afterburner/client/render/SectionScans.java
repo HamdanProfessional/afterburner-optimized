@@ -1,5 +1,7 @@
 package com.afterburner.client.render;
 
+import com.mojang.blaze3d.systems.RenderSystem;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 
@@ -27,6 +29,10 @@ public final class SectionScans {
 
 	/** Bumped when a chunk's light is turned on or off: only then can a section's light answer change. */
 	private static final AtomicInteger lightSwitches = new AtomicInteger(1);
+	/** The last switch of each chunk switched on the render thread (by ChunkPos key); render thread only. */
+	private static final Long2IntOpenHashMap chunkSwitched = new Long2IntOpenHashMap();
+	/** Every section's light is asked again if it was found off before this switch (one switched off the render thread, ...). */
+	private static volatile int allSwitched = 1;
 
 	private static final Seen rebuildSeen = new Seen();
 	private static int rebuildMarked = -1, rebuildLight = -1;
@@ -42,8 +48,16 @@ public final class SectionScans {
 		marked.incrementAndGet();
 	}
 
-	public static void lightSwitched() {
-		lightSwitches.incrementAndGet();
+	public static void lightSwitched(long chunk) {
+		int n = lightSwitches.incrementAndGet();
+		if (!RenderSystem.isOnRenderThread()) {
+			allSwitched = n;
+		} else if (chunkSwitched.size() >= 1 << 16) {
+			chunkSwitched.clear();
+			allSwitched = n;
+		} else {
+			chunkSwitched.put(chunk, n);
+		}
 	}
 
 	public static void blockEntitiesChanged() {
@@ -61,15 +75,17 @@ public final class SectionScans {
 	}
 
 	/**
-	 * In the rebuild look, whether a marked section's light is on: off as when last asked while no chunk's light was
-	 * switched since, else asked. Its light stays off until its chunk's is turned on, so that's the same answer.
+	 * In the rebuild look, whether a marked section's light is known to be off: it was off when last asked, and neither its
+	 * chunk's light nor (off the render thread) any chunk's was switched since. Its light stays off until its chunk's is turned on.
 	 */
-	public static boolean lightOn(LightWaitSection section, java.util.function.BooleanSupplier ask) {
-		int light = lightSwitches.get();
-		if (section.afterburner$lightOffAt() == light) return false;
-		boolean on = ask.getAsBoolean();
-		section.afterburner$setLightOffAt(on ? 0 : light);
-		return on;
+	public static boolean lightKnownOff(LightWaitSection section, long chunk) {
+		int off = section.afterburner$lightOffAt();
+		return off != 0 && off >= allSwitched && chunkSwitched.get(chunk) <= off;
+	}
+
+	/** What the light lookup answered for a section: off is remembered until a switch that may turn it on. */
+	public static void lightAsked(LightWaitSection section, boolean on) {
+		section.afterburner$setLightOffAt(on ? 0 : lightSwitches.get());
 	}
 
 	/** The visible sections that have block entities, in the same order. */

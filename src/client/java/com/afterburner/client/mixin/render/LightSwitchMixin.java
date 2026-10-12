@@ -13,6 +13,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class LightSwitchMixin {
 	@Inject(method = "setLightEnabled", at = @At("HEAD"))
 	private void afterburner$switched(ChunkPos pos, boolean enabled, CallbackInfo ci) {
-		if (((Object) this).getClass() == LevelLightEngine.class) SectionScans.lightSwitched();
+		if (((Object) this).getClass() == LevelLightEngine.class) SectionScans.lightSwitched(pos.toLong());
 	}
 }
